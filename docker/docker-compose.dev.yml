@@ -1,0 +1,18 @@
+version: '3.8'
+
+# Development compose - use with: docker compose -f docker-compose.yml -f docker/docker-compose.dev.yml up
+
+services:
+  api:
+    build: .
+    command: npm run dev
+    volumes:
+      - ../src:/app/src
+      - ../package.json:/app/package.json
+    environment:
+      - NODE_ENV=development
+      - LOG_LEVEL=debug
+
+  postgres:
+    ports:
+      - "5432:5432"

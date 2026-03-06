@@ -1,0 +1,72 @@
+{
+  "name": "Pricing Analysis for Pending Products",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 10 * * *" }]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 10 AM Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.API_BASE_URL}}/api/v1/products?status=discovered&limit=50",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Key", "value": "={{$env.ADMIN_API_KEY}}" }
+          ]
+        }
+      },
+      "id": "get-pending",
+      "name": "Get Discovered Products",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data"
+      },
+      "id": "split-products",
+      "name": "Split Products",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.API_BASE_URL}}/api/v1/products/{{$json.id}}/analyze",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Key", "value": "={{$env.ADMIN_API_KEY}}" }
+          ]
+        },
+        "options": { "timeout": 60000 }
+      },
+      "id": "analyze-each",
+      "name": "Analyze Product",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [850, 300]
+    }
+  ],
+  "connections": {
+    "Daily 10 AM Trigger": { "main": [[{ "node": "Get Discovered Products", "type": "main", "index": 0 }]] },
+    "Get Discovered Products": { "main": [[{ "node": "Split Products", "type": "main", "index": 0 }]] },
+    "Split Products": { "main": [[{ "node": "Analyze Product", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}
