@@ -24,4 +24,23 @@ export interface DiscoveredProduct {
   trend_score: number;
   final_score: number;
   metadata?: Record<string, any>;
+  commerce?: CommercePackage;
+}
+
+export interface TikTokAdScript {
+  hook: string;
+  problem: string;
+  demo: string;
+  cta: string;
+}
+
+export interface CommercePackage {
+  arabic_title: string;
+  recommended_price_sar: number;
+  estimated_cost_sar: number;
+  estimated_profit_sar: number;
+  description_ar: string;
+  features: string[];
+  tiktok_ad_script: TikTokAdScript;
+  potential_label: string;
 }
