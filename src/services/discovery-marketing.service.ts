@@ -1,5 +1,6 @@
 import { MarketingRepo } from '../database/repositories';
 import { DiscoveredProduct as DiscoveryProduct } from '../discovery/types';
+import { env } from '../config';
 import logger from '../utils/logger';
 
 const MIN_SCORE = Number(process.env.DISCOVERY_MARKETING_MIN_SCORE) || 70;
@@ -19,21 +20,75 @@ interface MarketingPayload {
   platform_suggestion: string;
 }
 
-/**
- * Generate deterministic mock marketing content for a product.
- * Used when OPENAI_API_KEY is not configured.
- */
-function generateMockMarketing(product: DiscoveryProduct): MarketingPayload {
-  const name = product.name;
-  const cat = product.category;
-
+function getPlatformSuggestion(source: string): string {
   const platformMap: Record<string, string> = {
     tiktok: 'tiktok',
     amazon: 'instagram',
     aliexpress: 'snapchat',
   };
+  return platformMap[source] || 'meta';
+}
 
-  const platform = platformMap[product.source] || 'meta';
+/**
+ * Generate marketing content via OpenAI API.
+ * Falls back to deterministic content on any failure.
+ */
+async function generateOpenAIMarketing(product: DiscoveryProduct): Promise<MarketingPayload | null> {
+  try {
+    const { default: OpenAI } = await import('openai');
+    const client = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+
+    const prompt = `You are a Saudi e-commerce marketing expert. Generate marketing copy for this product:
+Name: ${product.name}
+Category: ${product.category}
+Source: ${product.source}
+Score: ${product.final_score}/100
+
+Return ONLY valid JSON with these fields:
+{
+  "hook_ar": "Arabic hook (1 sentence, attention-grabbing)",
+  "hook_en": "English hook (1 sentence)",
+  "description_ar": "Arabic product description (2-3 sentences, Saudi market focus)",
+  "description_en": "English product description (2-3 sentences)",
+  "cta_ar": "Arabic call to action (1 sentence)",
+  "cta_en": "English call to action (1 sentence)"
+}`;
+
+    const response = await client.chat.completions.create({
+      model: env.OPENAI_MODEL || 'gpt-4o',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.7,
+      max_tokens: 500,
+    });
+
+    const raw = response.choices?.[0]?.message?.content?.trim();
+    if (!raw) return null;
+
+    const jsonStr = raw.replace(/```json?\s*/g, '').replace(/```/g, '').trim();
+    const parsed = JSON.parse(jsonStr);
+
+    return {
+      hook_ar: parsed.hook_ar || '',
+      hook_en: parsed.hook_en || '',
+      description_ar: parsed.description_ar || '',
+      description_en: parsed.description_en || '',
+      cta_ar: parsed.cta_ar || '',
+      cta_en: parsed.cta_en || '',
+      platform_suggestion: getPlatformSuggestion(product.source),
+    };
+  } catch (err) {
+    logger.warn(`OpenAI marketing generation failed for "${product.name}": ${err}`);
+    return null;
+  }
+}
+
+/**
+ * Generate deterministic mock marketing content for a product.
+ * Used when OPENAI_API_KEY is not configured or OpenAI call fails.
+ */
+function generateFallbackMarketing(product: DiscoveryProduct): MarketingPayload {
+  const name = product.name;
+  const cat = product.category;
 
   return {
     hook_ar: `اكتشف ${name} - المنتج الأكثر رواجاً في فئة ${cat}!`,
@@ -42,8 +97,20 @@ function generateMockMarketing(product: DiscoveryProduct): MarketingPayload {
     description_en: `${name} is the perfect product for your online store. High engagement rates and excellent sales potential in the Saudi market.`,
     cta_ar: `اطلب الآن واحصل على أفضل سعر! 🔥`,
     cta_en: `Order now and get the best price! 🔥`,
-    platform_suggestion: platform,
+    platform_suggestion: getPlatformSuggestion(product.source),
   };
+}
+
+/**
+ * Generate marketing content: uses OpenAI if API key is set, otherwise deterministic fallback.
+ */
+async function generateMarketing(product: DiscoveryProduct): Promise<MarketingPayload> {
+  if (env.OPENAI_API_KEY) {
+    const aiResult = await generateOpenAIMarketing(product);
+    if (aiResult) return aiResult;
+    logger.info(`Falling back to deterministic marketing for "${product.name}"`);
+  }
+  return generateFallbackMarketing(product);
 }
 
 /**
@@ -71,7 +138,7 @@ export async function generateMarketingForProducts(
     }
 
     try {
-      const marketing = generateMockMarketing(product);
+      const marketing = await generateMarketing(product);
 
       const assets = [
         {
