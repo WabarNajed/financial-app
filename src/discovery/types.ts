@@ -39,6 +39,10 @@ export interface CommercePackage {
   recommended_price_sar: number;
   estimated_cost_sar: number;
   estimated_profit_sar: number;
+  min_price_sar: number;
+  max_price_sar: number;
+  competitor_price_sar: number;
+  gross_margin_percent: number;
   description_ar: string;
   features: string[];
   tiktok_ad_script: TikTokAdScript;
