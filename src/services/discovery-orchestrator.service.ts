@@ -23,6 +23,7 @@ export interface DiscoverLiveResult {
   scored: number;
   marketing_generated: number;
   products: DiscoveredProduct[];
+  errors?: string[];
 }
 
 export class DiscoveryOrchestratorService {
@@ -93,6 +94,8 @@ export class DiscoveryOrchestratorService {
     // Strip the added relevance_score field for clean output
     const accepted: DiscoveredProduct[] = relevant.map(({ relevance_score, ...rest }) => rest);
 
+    const allErrors: string[] = [];
+
     const result: DiscoverLiveResult = {
       count: accepted.length,
       saved: 0,
@@ -109,14 +112,24 @@ export class DiscoveryOrchestratorService {
         result.saved = persistence.saved + persistence.updated;
         result.skipped = persistence.skipped;
         result.scored = persistence.scored;
+        if (persistence.errors.length > 0) {
+          allErrors.push(...persistence.errors);
+        }
 
         // Step 5: Generate marketing assets
-        if (generateMarketing) {
+        if (generateMarketing && persistence.productIds.length > 0) {
           try {
             // Build name→DB ID map from persistence
             const productIdMap = new Map<string, string>();
-            for (let i = 0; i < accepted.length; i++) {
-              if (persistence.productIds[i]) {
+            for (const product of accepted) {
+              const idx = accepted.indexOf(product);
+              if (persistence.productIds[idx]) {
+                productIdMap.set(product.name, persistence.productIds[idx]);
+              }
+            }
+            // Also try matching by name for products that were updated (index might differ)
+            for (let i = 0; i < persistence.productIds.length; i++) {
+              if (persistence.productIds[i] && accepted[i]) {
                 productIdMap.set(accepted[i].name, persistence.productIds[i]);
               }
             }
@@ -125,13 +138,21 @@ export class DiscoveryOrchestratorService {
             const marketing = await generateMarketingForProducts(accepted, productIdMap);
             result.marketing_generated = marketing.generated;
             logger.info(`[marketing] generated=${marketing.generated} skipped=${marketing.skipped}`);
-          } catch (marketingErr) {
-            logger.warn(`discover-live: marketing generation failed gracefully: ${marketingErr}`);
+          } catch (marketingErr: any) {
+            const msg = `marketing failed: ${marketingErr?.message || marketingErr}`;
+            logger.warn(`discover-live: ${msg}`);
+            allErrors.push(msg);
           }
         }
-      } catch (persistErr) {
-        logger.error(`discover-live: persistence failed: ${persistErr}`);
+      } catch (persistErr: any) {
+        const msg = `persistence failed: ${persistErr?.message || persistErr}`;
+        logger.error(`discover-live: ${msg}`);
+        allErrors.push(msg);
       }
+    }
+
+    if (allErrors.length > 0) {
+      result.errors = allErrors;
     }
 
     logger.info(

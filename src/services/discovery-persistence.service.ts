@@ -1,5 +1,4 @@
 import { getDb } from '../database/connection';
-import { ProductScoreRepo } from '../database/repositories';
 import { DiscoveredProduct as DiscoveryProduct } from '../discovery/types';
 import logger from '../utils/logger';
 
@@ -9,14 +8,12 @@ export interface PersistenceSummary {
   skipped: number;
   scored: number;
   productIds: string[];
+  errors: string[];
 }
 
 /**
  * Persists discovered products into PostgreSQL.
- * Creates new rows or updates existing ones; also upserts product_scores.
- *
- * Uses direct Knex queries with explicit ::jsonb casts to avoid
- * implicit text→jsonb casting issues with the pg driver.
+ * Uses the exact same insert pattern as the working seed script.
  */
 export async function persistDiscoveredProducts(
   products: DiscoveryProduct[],
@@ -27,88 +24,113 @@ export async function persistDiscoveredProducts(
     skipped: 0,
     scored: 0,
     productIds: [],
+    errors: [],
   };
 
-  const db = getDb();
+  let db: ReturnType<typeof getDb>;
+  try {
+    db = getDb();
+  } catch (connErr: any) {
+    const msg = `DB connection failed: ${connErr?.message || connErr}`;
+    logger.error(`[persist] ${msg}`);
+    summary.errors.push(msg);
+    summary.skipped = products.length;
+    return summary;
+  }
 
   for (const product of products) {
+    let productId: string | null = null;
+
+    // --- Step A: Insert or update the product row ---
     try {
       logger.info(`[persist] processing "${product.name}" source=${product.source} final_score=${product.final_score}`);
 
       // Check if product already exists (case-insensitive name + source)
-      const existing = await db('products')
-        .whereRaw('LOWER(name) = ?', [product.name.trim().toLowerCase()])
-        .andWhere({ source: product.source })
-        .first();
-
-      let productId: string;
-
-      // Pre-serialize JSONB values
-      const keywordsStr = JSON.stringify(product.keywords || []);
-      const imageUrlsStr = JSON.stringify(product.image_url ? [product.image_url] : []);
-      const metadataStr = JSON.stringify(product.metadata || {});
+      let existing: any = null;
+      try {
+        existing = await db('products')
+          .whereRaw('LOWER(name) = ?', [product.name.trim().toLowerCase()])
+          .andWhere({ source: product.source })
+          .first();
+      } catch (findErr: any) {
+        logger.warn(`[persist] lookup failed for "${product.name}": ${findErr?.message}`);
+        // Continue to insert path
+      }
 
       if (existing && existing.id) {
-        // Update existing product with latest scores
         await db('products').where({ id: existing.id }).update({
           virality_score: product.virality_score,
           impulse_buy_score: product.impulse_buy_score,
           saudi_relevance_score: product.saudi_relevance_score,
-          keywords: db.raw('?::jsonb', [keywordsStr]),
-          metadata: db.raw('?::jsonb', [metadataStr]),
+          keywords: JSON.stringify(product.keywords || []),
+          metadata: JSON.stringify(product.metadata || {}),
           updated_at: new Date(),
         });
         productId = existing.id;
         summary.updated++;
-        logger.info(`[persist] updated existing product "${product.name}" id=${productId}`);
+        logger.info(`[persist] updated "${product.name}" id=${productId}`);
       } else {
-        // Create new product with explicit JSONB casts
+        // Match the seed script's exact insert pattern
         const [row] = await db('products').insert({
           name: product.name,
           name_ar: product.name_ar || null,
           category: product.category,
           source: product.source,
-          source_url: product.source_url,
+          source_url: product.source_url || '',
           trend_signal: product.trend_signal || 'discovery',
           virality_score: product.virality_score,
           impulse_buy_score: product.impulse_buy_score,
           saudi_relevance_score: product.saudi_relevance_score,
-          image_urls: db.raw('?::jsonb', [imageUrlsStr]),
-          keywords: db.raw('?::jsonb', [keywordsStr]),
+          image_urls: JSON.stringify(product.image_url ? [product.image_url] : []),
+          keywords: JSON.stringify(product.keywords || []),
           status: 'discovered',
-          discovered_at: new Date(),
-          metadata: db.raw('?::jsonb', [metadataStr]),
+          metadata: JSON.stringify(product.metadata || {}),
         }).returning('id');
         productId = row.id;
         summary.saved++;
-        logger.info(`[persist] created new product "${product.name}" id=${productId}`);
-      }
-
-      summary.productIds.push(productId);
-
-      // Upsert product score
-      try {
-        await ProductScoreRepo.upsert({
-          product_id: productId,
-          trend_score: product.trend_score,
-          demand_score: Math.round((product.virality_score + product.impulse_buy_score) / 2),
-          margin_score: product.margin_score,
-          shipping_score: product.shipping_score,
-          virality_score: product.virality_score,
-          competition_score: product.competition_score,
-          supplier_trust_score: product.supplier_trust_score,
-          final_score: product.final_score,
-          scored_at: new Date(),
-        });
-        summary.scored++;
-        logger.info(`[persist] scored product "${product.name}" final_score=${product.final_score}`);
-      } catch (scoreErr: any) {
-        logger.warn(`[persist] FAILED to upsert score for "${product.name}" id=${productId}: ${scoreErr?.message || scoreErr}`);
+        logger.info(`[persist] created "${product.name}" id=${productId}`);
       }
     } catch (err: any) {
-      logger.error(`[persist] FAILED to persist product "${product.name}": ${err?.message || err}`);
-      if (err?.stack) logger.error(`[persist] stack: ${err.stack}`);
+      const msg = `INSERT failed for "${product.name}": ${err?.message || err}`;
+      logger.error(`[persist] ${msg}`);
+      summary.errors.push(msg);
       summary.skipped++;
+    }
+
+    if (!productId) continue;
+
+    summary.productIds.push(productId);
+
+    // --- Step B: Upsert product score ---
+    try {
+      const scoreData = {
+        product_id: productId,
+        trend_score: product.trend_score,
+        demand_score: Math.round((product.virality_score + product.impulse_buy_score) / 2),
+        margin_score: product.margin_score,
+        shipping_score: product.shipping_score,
+        virality_score: product.virality_score,
+        competition_score: product.competition_score,
+        supplier_trust_score: product.supplier_trust_score,
+        final_score: product.final_score,
+        scored_at: new Date(),
+      };
+
+      const existingScore = await db('product_scores')
+        .where({ product_id: productId })
+        .first();
+
+      if (existingScore) {
+        await db('product_scores').where({ id: existingScore.id }).update(scoreData);
+      } else {
+        await db('product_scores').insert(scoreData);
+      }
+      summary.scored++;
+      logger.info(`[persist] scored "${product.name}" final_score=${product.final_score}`);
+    } catch (scoreErr: any) {
+      const msg = `SCORE failed for "${product.name}": ${scoreErr?.message || scoreErr}`;
+      logger.warn(`[persist] ${msg}`);
+      summary.errors.push(msg);
     }
   }
 
