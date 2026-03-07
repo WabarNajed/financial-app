@@ -91,8 +91,11 @@ export class DiscoveryOrchestratorService {
     const relevant = filterByRelevance(deduped, seedKeywords, MIN_RELEVANCE);
     logger.info(`discover-live: after relevance filter (>=${MIN_RELEVANCE}): ${relevant.length}`);
 
-    // Strip the added relevance_score field for clean output
-    const accepted: DiscoveredProduct[] = relevant.map(({ relevance_score, ...rest }) => rest);
+    // Strip relevance_score but keep matched_keyword in metadata
+    const accepted: DiscoveredProduct[] = relevant.map(({ relevance_score, matched_keyword, ...rest }) => ({
+      ...rest,
+      metadata: { ...(rest.metadata || {}), matched_keyword },
+    }));
 
     const allErrors: string[] = [];
 
