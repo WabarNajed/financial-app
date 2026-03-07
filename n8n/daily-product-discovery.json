@@ -1,0 +1,109 @@
+{
+  "name": "Daily Product Discovery",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 8 * * *" }]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 8 AM Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.API_BASE_URL}}/api/v1/products/discover",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Key", "value": "={{$env.ADMIN_API_KEY}}" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "keywords", "value": "={{JSON.stringify([])}}" }
+          ]
+        },
+        "options": { "timeout": 120000 }
+      },
+      "id": "discover-products",
+      "name": "Discover Products",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{$json.data.discovered}}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "check-results",
+      "name": "Products Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.API_BASE_URL}}/api/v1/workflows/analyze-pending",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Key", "value": "={{$env.ADMIN_API_KEY}}" }
+          ]
+        },
+        "options": { "timeout": 300000 }
+      },
+      "id": "analyze-products",
+      "name": "Analyze Discovered Products",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [850, 200]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "message",
+              "value": "No new products discovered today."
+            }
+          ]
+        }
+      },
+      "id": "no-products",
+      "name": "No Products",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [850, 400]
+    }
+  ],
+  "connections": {
+    "Daily 8 AM Trigger": { "main": [[{ "node": "Discover Products", "type": "main", "index": 0 }]] },
+    "Discover Products": { "main": [[{ "node": "Products Found?", "type": "main", "index": 0 }]] },
+    "Products Found?": {
+      "main": [
+        [{ "node": "Analyze Discovered Products", "type": "main", "index": 0 }],
+        [{ "node": "No Products", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" }
+}

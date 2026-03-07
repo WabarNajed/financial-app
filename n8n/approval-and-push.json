@@ -1,0 +1,120 @@
+{
+  "name": "Approval and Push to Salla",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "approve-product",
+        "responseMode": "responseNode"
+      },
+      "id": "webhook-trigger",
+      "name": "Approval Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.API_BASE_URL}}/api/v1/products/{{$json.body.product_id}}/approve",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Key", "value": "={{$env.ADMIN_API_KEY}}" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "reviewed_by", "value": "={{$json.body.reviewed_by || 'admin'}}" },
+            { "name": "notes", "value": "={{$json.body.notes || ''}}" }
+          ]
+        }
+      },
+      "id": "approve-product",
+      "name": "Approve Product",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.API_BASE_URL}}/api/v1/products/{{$json.body.product_id}}/content",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Key", "value": "={{$env.ADMIN_API_KEY}}" }
+          ]
+        }
+      },
+      "id": "generate-content",
+      "name": "Generate Arabic Content",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.API_BASE_URL}}/api/v1/products/{{$json.body.product_id}}/push-to-salla",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Key", "value": "={{$env.ADMIN_API_KEY}}" }
+          ]
+        },
+        "options": { "timeout": 30000 }
+      },
+      "id": "push-to-salla",
+      "name": "Push to Salla",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.API_BASE_URL}}/api/v1/products/{{$json.body.product_id}}/marketing",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Key", "value": "={{$env.ADMIN_API_KEY}}" }
+          ]
+        }
+      },
+      "id": "prepare-marketing",
+      "name": "Prepare Marketing Assets",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"status\": \"success\", \"message\": \"Product approved and pushed to Salla\"}"
+      },
+      "id": "respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    }
+  ],
+  "connections": {
+    "Approval Webhook": { "main": [[{ "node": "Approve Product", "type": "main", "index": 0 }]] },
+    "Approve Product": { "main": [[{ "node": "Generate Arabic Content", "type": "main", "index": 0 }]] },
+    "Generate Arabic Content": { "main": [[{ "node": "Push to Salla", "type": "main", "index": 0 }]] },
+    "Push to Salla": { "main": [[{ "node": "Prepare Marketing Assets", "type": "main", "index": 0 }]] },
+    "Prepare Marketing Assets": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}
