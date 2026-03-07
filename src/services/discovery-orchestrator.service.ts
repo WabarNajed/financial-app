@@ -3,8 +3,32 @@ import { discoverFromAmazon } from '../discovery/amazon';
 import { discoverFromTikTok } from '../discovery/tiktok';
 import { DiscoveredProduct } from '../discovery/types';
 import { dedupeProducts } from '../discovery/utils';
+import { filterByRelevance } from '../utils/keyword-relevance';
+import { persistDiscoveredProducts, PersistenceSummary } from './discovery-persistence.service';
+import { generateMarketingForProducts } from './discovery-marketing.service';
+import logger from '../utils/logger';
+
+const MIN_RELEVANCE = Number(process.env.DISCOVERY_MIN_RELEVANCE) || 55;
+
+export interface DiscoverLiveOptions {
+  keywords: string[];
+  save?: boolean;
+  generateMarketing?: boolean;
+}
+
+export interface DiscoverLiveResult {
+  count: number;
+  saved: number;
+  skipped: number;
+  scored: number;
+  marketing_generated: number;
+  products: DiscoveredProduct[];
+}
 
 export class DiscoveryOrchestratorService {
+  /**
+   * Original discover method — preserved for backward compatibility.
+   */
   async discover(keywords: string[]): Promise<DiscoveredProduct[]> {
     const cleanKeywords = (keywords || [])
       .map((k) => String(k).trim())
@@ -21,5 +45,88 @@ export class DiscoveryOrchestratorService {
     ]);
 
     return dedupeProducts([...tiktok, ...amazon, ...aliexpress]);
+  }
+
+  /**
+   * Enhanced discover-live with relevance filtering, DB persistence, and marketing generation.
+   */
+  async discoverLive(options: DiscoverLiveOptions): Promise<DiscoverLiveResult> {
+    const { save = true, generateMarketing = true } = options;
+
+    const cleanKeywords = (options.keywords || [])
+      .map((k) => String(k).trim())
+      .filter(Boolean);
+
+    const seedKeywords = cleanKeywords.length
+      ? cleanKeywords
+      : ['portable blender', 'galaxy projector', 'massage gun'];
+
+    logger.info(`discover-live: starting with keywords=[${seedKeywords.join(', ')}]`);
+
+    // Step 1: Discover from all sources
+    const [tiktok, amazon, aliexpress] = await Promise.all([
+      discoverFromTikTok(seedKeywords),
+      discoverFromAmazon(seedKeywords),
+      discoverFromAliExpress(seedKeywords),
+    ]);
+
+    const raw = [...tiktok, ...amazon, ...aliexpress];
+    logger.info(`discover-live: raw products from sources: ${raw.length}`);
+
+    // Step 2: Deduplicate
+    const deduped = dedupeProducts(raw);
+    logger.info(`discover-live: after dedup: ${deduped.length}`);
+
+    // Step 3: Filter by keyword relevance
+    const relevant = filterByRelevance(deduped, seedKeywords, MIN_RELEVANCE);
+    logger.info(`discover-live: after relevance filter (>=${MIN_RELEVANCE}): ${relevant.length}`);
+
+    // Strip the added relevance_score field for clean output
+    const accepted: DiscoveredProduct[] = relevant.map(({ relevance_score, ...rest }) => rest);
+
+    const result: DiscoverLiveResult = {
+      count: accepted.length,
+      saved: 0,
+      skipped: 0,
+      scored: 0,
+      marketing_generated: 0,
+      products: accepted,
+    };
+
+    // Step 4: Persist to DB
+    if (save && accepted.length > 0) {
+      try {
+        const persistence: PersistenceSummary = await persistDiscoveredProducts(accepted);
+        result.saved = persistence.saved + persistence.updated;
+        result.skipped = persistence.skipped;
+        result.scored = persistence.scored;
+
+        // Step 5: Generate marketing assets
+        if (generateMarketing) {
+          try {
+            // Build name→DB ID map from persistence
+            const productIdMap = new Map<string, string>();
+            for (let i = 0; i < accepted.length; i++) {
+              if (persistence.productIds[i]) {
+                productIdMap.set(accepted[i].name, persistence.productIds[i]);
+              }
+            }
+
+            const marketing = await generateMarketingForProducts(accepted, productIdMap);
+            result.marketing_generated = marketing.generated;
+          } catch (marketingErr) {
+            logger.warn(`discover-live: marketing generation failed gracefully: ${marketingErr}`);
+          }
+        }
+      } catch (persistErr) {
+        logger.error(`discover-live: persistence failed: ${persistErr}`);
+      }
+    }
+
+    logger.info(
+      `discover-live: complete — count=${result.count} saved=${result.saved} scored=${result.scored} marketing=${result.marketing_generated}`,
+    );
+
+    return result;
   }
 }
