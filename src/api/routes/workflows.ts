@@ -44,17 +44,20 @@ router.post('/analyze-pending', async (_req: Request, res: Response) => {
 });
 
 // Live discovery across TikTok + Amazon + AliExpress
+// Enhanced: relevance filtering, DB persistence, marketing generation
 router.post('/discover-live', async (req: Request, res: Response) => {
   try {
     const keywords = Array.isArray(req.body?.keywords) ? req.body.keywords : [];
-    const products = await discovery.discover(keywords);
+    const save = req.body?.save !== false;
+    const generateMarketing = req.body?.generateMarketing !== false;
 
-    res.json({
-      data: {
-        count: products.length,
-        products,
-      },
+    const result = await discovery.discoverLive({
+      keywords,
+      save,
+      generateMarketing,
     });
+
+    res.json({ data: result });
   } catch (error) {
     logger.error(`POST /workflows/discover-live error: ${error}`);
     res.status(500).json({ error: 'Live discovery failed' });

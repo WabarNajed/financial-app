@@ -56,6 +56,13 @@ export const ProductRepo = {
       .orWhere('category', 'ilike', `%${keyword}%`)
       .limit(50);
   },
+
+  async findByNameAndSource(name: string, source: string): Promise<DiscoveredProduct | null> {
+    return db()('products')
+      .whereRaw('LOWER(name) = ?', [name.trim().toLowerCase()])
+      .andWhere({ source })
+      .first() || null;
+  },
 };
 
 // --- Supplier Offers ---
