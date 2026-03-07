@@ -1,10 +1,12 @@
 import { Router, Request, Response } from 'express';
 import { WorkflowRepo } from '../../database/repositories';
 import { OrchestratorService } from '../../services/orchestrator.service';
+import { DiscoveryOrchestratorService } from '../../services/discovery-orchestrator.service';
 import logger from '../../utils/logger';
 
 const router = Router();
 const orchestrator = new OrchestratorService();
+const discovery = new DiscoveryOrchestratorService();
 
 // Get recent workflow runs
 router.get('/', async (req: Request, res: Response) => {
@@ -38,6 +40,24 @@ router.post('/analyze-pending', async (_req: Request, res: Response) => {
   } catch (error) {
     logger.error(`POST /workflows/analyze-pending error: ${error}`);
     res.status(500).json({ error: 'Analysis failed' });
+  }
+});
+
+// Live discovery across TikTok + Amazon + AliExpress
+router.post('/discover-live', async (req: Request, res: Response) => {
+  try {
+    const keywords = Array.isArray(req.body?.keywords) ? req.body.keywords : [];
+    const products = await discovery.discover(keywords);
+
+    res.json({
+      data: {
+        count: products.length,
+        products,
+      },
+    });
+  } catch (error) {
+    logger.error(`POST /workflows/discover-live error: ${error}`);
+    res.status(500).json({ error: 'Live discovery failed' });
   }
 });
 
