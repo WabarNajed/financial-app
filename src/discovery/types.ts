@@ -25,6 +25,7 @@ export interface DiscoveredProduct {
   final_score: number;
   metadata?: Record<string, any>;
   commerce?: CommercePackage;
+  listing_pack?: ListingPack;
 }
 
 export interface TikTokAdScript {
@@ -32,6 +33,21 @@ export interface TikTokAdScript {
   problem: string;
   demo: string;
   cta: string;
+}
+
+export interface ListingPack {
+  store_title_ar: string;
+  store_title_en: string;
+  short_description_ar: string;
+  short_description_en: string;
+  full_description_ar: string;
+  seo_title_ar: string;
+  seo_description_ar: string;
+  tags: string[];
+  suggested_category: string;
+  compare_at_price_sar: number;
+  sku_hint: string;
+  stock_recommendation: number;
 }
 
 export interface CommercePackage {

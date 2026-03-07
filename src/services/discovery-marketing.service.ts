@@ -1,5 +1,5 @@
 import { MarketingRepo } from '../database/repositories';
-import { DiscoveredProduct as DiscoveryProduct, CommercePackage, TikTokAdScript } from '../discovery/types';
+import { DiscoveredProduct as DiscoveryProduct, CommercePackage, TikTokAdScript, ListingPack } from '../discovery/types';
 import { env } from '../config';
 import logger from '../utils/logger';
 
@@ -538,5 +538,220 @@ export async function enrichWithCommerce(products: DiscoveryProduct[]): Promise<
     }
   }
   logger.info(`Commerce enrichment: ${enriched}/${products.length} products enriched`);
+  return enriched;
+}
+
+// ---------------------------------------------------------------------------
+// Store Listing Pack Generation
+// ---------------------------------------------------------------------------
+
+const STOCK_BY_LABEL: Record<string, number> = {
+  'High Potential': 50,
+  'Good Test Product': 25,
+  'Medium Potential': 12,
+  'Low Priority': 5,
+};
+
+// Category code prefix for SKU
+const CATEGORY_SKU_PREFIX: Record<string, string> = {
+  kitchen: 'KTG',
+  beauty: 'BTY',
+  fitness: 'FIT',
+  'fitness & health': 'FIT',
+  car: 'CAR',
+  home: 'HOM',
+  tech: 'TCH',
+};
+
+// Product code for SKU (3-letter abbreviation)
+const PRODUCT_SKU_CODE: Record<string, string> = {
+  'Portable Blender': 'PBL',
+  'Galaxy Projector': 'GXP',
+  'Ice Face Roller': 'IFR',
+  'Mini Thermal Printer': 'MTP',
+  'Car Vacuum Cleaner': 'CVC',
+  'LED Quran Speaker': 'LQS',
+  'Massage Gun': 'MSG',
+  'Car Phone Holder': 'CPH',
+};
+
+function generateSku(product: DiscoveryProduct): string {
+  const catPrefix = CATEGORY_SKU_PREFIX[product.category.toLowerCase()] ?? 'GEN';
+  const prodCode = PRODUCT_SKU_CODE[product.name] ??
+    product.name.split(' ').map(w => w[0]?.toUpperCase() ?? '').join('').slice(0, 3);
+  return `${catPrefix}-${prodCode}-001`;
+}
+
+// Ecommerce category mapping
+const SUGGESTED_CATEGORIES: Record<string, string> = {
+  'Portable Blender': 'أجهزة المطبخ الصغيرة',
+  'Galaxy Projector': 'إضاءة وديكور المنزل',
+  'Ice Face Roller': 'أدوات العناية بالبشرة',
+  'Mini Thermal Printer': 'إلكترونيات وأجهزة ذكية',
+  'Car Vacuum Cleaner': 'إكسسوارات السيارات',
+  'LED Quran Speaker': 'هدايا إسلامية وديكور',
+  'Massage Gun': 'أجهزة اللياقة والاستشفاء',
+  'Car Phone Holder': 'إكسسوارات السيارات',
+};
+
+const CATEGORY_FALLBACK: Record<string, string> = {
+  kitchen: 'أجهزة المطبخ',
+  beauty: 'العناية الشخصية والجمال',
+  fitness: 'الرياضة واللياقة',
+  'fitness & health': 'الرياضة واللياقة',
+  car: 'إكسسوارات السيارات',
+  home: 'المنزل والديكور',
+  tech: 'إلكترونيات',
+};
+
+interface ProductListingContent {
+  store_title_ar: string;
+  store_title_en: string;
+  short_description_ar: string;
+  short_description_en: string;
+  full_description_ar: string;
+  seo_title_ar: string;
+  seo_description_ar: string;
+  tags: string[];
+}
+
+const PRODUCT_LISTING: Record<string, ProductListingContent> = {
+  'Portable Blender': {
+    store_title_ar: 'خلاط محمول USB قابل للشحن',
+    store_title_en: 'Portable USB Rechargeable Blender',
+    short_description_ar: 'خلاط صغير يعمل بالشحن لتحضير السموذي في أي مكان. مثالي للرياضة والسفر.',
+    short_description_en: 'Compact rechargeable blender for smoothies on the go. Perfect for gym and travel.',
+    full_description_ar: 'خلاط محمول يعمل بشحن USB مصمم لحياتك المتنقلة. حضّر سموذي طازج في النادي أو المكتب أو أثناء السفر خلال ٣٠ ثانية فقط.\n\nمزود بشفرات ستانلس ستيل قوية تخلط الفواكه والثلج بسهولة. سعة ٣٨٠ مل مثالية لكوب واحد، وتصميمه الخفيف يناسب شنطة الجيم أو حقيبة السفر.\n\nسهل التنظيف – أضف ماء وصابون وشغّله لثوانٍ. شحنة واحدة تكفي لـ ١٥ كوب.',
+    seo_title_ar: 'خلاط محمول USB للسموذي – شحن سريع وتصميم خفيف',
+    seo_description_ar: 'اشتري خلاط محمول USB قابل للشحن. مثالي لتحضير السموذي في النادي والسفر. شفرات ستانلس ستيل وسعة ٣٨٠ مل. توصيل سريع للسعودية.',
+    tags: ['خلاط محمول', 'سموذي', 'USB', 'رياضة', 'سفر', 'مطبخ', 'portable blender'],
+  },
+  'Galaxy Projector': {
+    store_title_ar: 'بروجكتر نجوم المجرة مع ريموت',
+    store_title_en: 'Galaxy Star Projector with Remote Control',
+    short_description_ar: 'جهاز عرض نجوم وألوان المجرة لغرفتك. أكثر من ١٥ وضع إضاءة مع ريموت.',
+    short_description_en: 'Galaxy and star projector for your room. 15+ lighting modes with remote control.',
+    full_description_ar: 'حوّل غرفتك إلى تجربة بصرية مذهلة مع بروجكتر المجرة. يعرض نجوم وسُدُم وألوان متحركة على السقف والجدران بأكثر من ١٥ وضع إضاءة مختلف.\n\nيأتي مع ريموت كنترول ومؤقت إيقاف تلقائي. صوته هادئ جداً مما يجعله مثالياً لغرف النوم وغرف الأطفال.\n\nيغطي مساحة حتى ٢٠ متر مربع. هدية مثالية لمحبي الأجواء المميزة والديكور العصري.',
+    seo_title_ar: 'بروجكتر نجوم المجرة – إضاءة ذكية وأجواء مميزة لغرفتك',
+    seo_description_ar: 'اشتري بروجكتر نجوم المجرة مع ريموت. ١٥+ وضع إضاءة، مؤقت تلقائي، يغطي ٢٠ م². مثالي لغرف النوم والأطفال. شحن سريع للسعودية.',
+    tags: ['بروجكتر', 'نجوم', 'إضاءة غرفة', 'ديكور', 'هدية', 'galaxy projector', 'LED'],
+  },
+  'Ice Face Roller': {
+    store_title_ar: 'رولر ثلج للوجه للنضارة وشد البشرة',
+    store_title_en: 'Ice Face Roller for Skin Tightening & Glow',
+    short_description_ar: 'أداة تبريد للوجه تقلل الانتفاخ وتشد المسام. ضعيها في الفريزر واستخدميها يومياً.',
+    short_description_en: 'Cooling face roller reduces puffiness and tightens pores. Freeze and use daily.',
+    full_description_ar: 'رولر الثلج أداة تجميل بسيطة وفعّالة تعتمد على العلاج بالبرودة. ضعيها في الفريزر ٣٠ دقيقة ومرّريها على وجهك صباحاً للحصول على بشرة مشدودة ونضرة.\n\nتقلل الانتفاخ والهالات حول العين بشكل ملحوظ من أول استخدام. مصنوعة من مواد آمنة تناسب البشرة الحساسة.\n\nتُستخدم بعد روتين العناية أو المكياج لتثبيت المنتجات وإغلاق المسام. أداة لا غنى عنها في روتينك اليومي.',
+    seo_title_ar: 'رولر ثلج للوجه – نضارة فورية وتقليل الانتفاخ',
+    seo_description_ar: 'اشتري رولر ثلج للوجه. يقلل الانتفاخ ويشد المسام ويمنح بشرتك نضارة فورية. آمن للبشرة الحساسة. توصيل سريع للسعودية.',
+    tags: ['رولر وجه', 'عناية بالبشرة', 'نضارة', 'تجميل', 'ice roller', 'بشرة', 'هدية نسائية'],
+  },
+  'Mini Thermal Printer': {
+    store_title_ar: 'طابعة حرارية صغيرة بلوتوث بدون حبر',
+    store_title_en: 'Mini Bluetooth Thermal Printer – Inkless',
+    short_description_ar: 'طابعة لاسلكية صغيرة تطبع من جوالك بدون حبر. مثالية للملاحظات والملصقات.',
+    short_description_en: 'Compact wireless printer. Print from your phone without ink. Great for notes and stickers.',
+    full_description_ar: 'طابعة حرارية لاسلكية بحجم الجيب تتصل بجوالك عبر البلوتوث. تطبع ملاحظات وصور وملصقات بدون الحاجة لحبر – توفير مستمر في التكلفة.\n\nمثالية للطلاب لطباعة ملخصات الدراسة، وللمنظمين لطباعة قوائم المهام والملصقات. التطبيق سهل الاستخدام ويدعم العربية.\n\nالبطارية تدوم أكثر من ٣ أيام بالاستخدام العادي. حجمها الصغير يخليها ترافقك في كل مكان.',
+    seo_title_ar: 'طابعة حرارية صغيرة بلوتوث – اطبع من جوالك بدون حبر',
+    seo_description_ar: 'اشتري طابعة حرارية صغيرة بلوتوث. تطبع من الجوال بدون حبر. مثالية للطلاب والملاحظات. بطارية ٣ أيام. شحن سريع للسعودية.',
+    tags: ['طابعة حرارية', 'بلوتوث', 'بدون حبر', 'طلاب', 'ملصقات', 'mini printer', 'تنظيم'],
+  },
+  'Car Vacuum Cleaner': {
+    store_title_ar: 'مكنسة سيارة لاسلكية بشفط قوي',
+    store_title_en: 'Cordless Car Vacuum Cleaner – High Suction',
+    short_description_ar: 'مكنسة لاسلكية صغيرة بشفط ٦٠٠٠ باسكال لتنظيف السيارة بسرعة. بطارية قابلة للشحن.',
+    short_description_en: 'Compact cordless vacuum with 6000Pa suction for quick car cleaning. Rechargeable battery.',
+    full_description_ar: 'مكنسة سيارة لاسلكية بقوة شفط ٦٠٠٠ باسكال تنظف الغبار والفتات والشعر من المقاعد والأرضية في دقائق. مصممة خصيصاً للمساحات الضيقة في السيارة.\n\nتأتي برأس مرن يوصل بين المقاعد وتحت الكراسي. الفلتر قابل للغسل والاستخدام المتكرر – بدون تكاليف إضافية.\n\nالبطارية تدوم ٣٠ دقيقة بشحنة واحدة وتُشحن عبر USB. خفيفة الوزن وتخزينها سهل في صندوق السيارة.',
+    seo_title_ar: 'مكنسة سيارة لاسلكية – شفط قوي ٦٠٠٠ باسكال وبطارية قابلة للشحن',
+    seo_description_ar: 'اشتري مكنسة سيارة لاسلكية بشفط ٦٠٠٠ باسكال. تنظف الغبار والفتات بسهولة. فلتر قابل للغسل وبطارية ٣٠ دقيقة. توصيل سريع للسعودية.',
+    tags: ['مكنسة سيارة', 'لاسلكية', 'تنظيف سيارة', 'شفط قوي', 'car vacuum', 'USB', 'إكسسوارات سيارة'],
+  },
+  'LED Quran Speaker': {
+    store_title_ar: 'سبيكر قرآن مع إضاءة LED هادئة',
+    store_title_en: 'LED Quran Speaker with Ambient Light',
+    short_description_ar: 'سبيكر أنيق يجمع بين تلاوة القرآن وإضاءة LED هادئة. يعمل بالريموت والبلوتوث.',
+    short_description_en: 'Elegant speaker combining Quran recitation with ambient LED lighting. Remote + Bluetooth.',
+    full_description_ar: 'سبيكر قرآن بتصميم عصري أنيق يجمع بين تلاوة القرآن الكريم بأصوات أشهر القرّاء وإضاءة LED بألوان متعددة هادئة تملأ الغرفة بأجواء روحانية.\n\nيعمل بالريموت كنترول ويدعم البلوتوث لتشغيل محتوى إضافي. مناسب لغرفة المعيشة أو المكتب أو غرفة النوم.\n\nتصميمه الأنيق يناسب أي ديكور. هدية مميزة لرمضان والمناسبات الدينية ولأحبابك.',
+    seo_title_ar: 'سبيكر قرآن مضيء – تلاوة بصوت نقي وإضاءة LED هادئة',
+    seo_description_ar: 'اشتري سبيكر قرآن مع إضاءة LED. تلاوات بأصوات أشهر القرّاء، ريموت وبلوتوث. هدية مثالية لرمضان. توصيل سريع للسعودية.',
+    tags: ['سبيكر قرآن', 'إضاءة LED', 'قرآن كريم', 'هدية رمضان', 'بلوتوث', 'ديكور إسلامي', 'Quran speaker'],
+  },
+  'Massage Gun': {
+    store_title_ar: 'مسدس تدليك احترافي للعضلات',
+    store_title_en: 'Professional Muscle Massage Gun',
+    short_description_ar: 'جهاز تدليك بعدة رؤوس وسرعات لتخفيف ألم العضلات وتسريع الاستشفاء بعد التمرين.',
+    short_description_en: 'Multi-head massage gun for muscle relief and post-workout recovery. Multiple speeds.',
+    full_description_ar: 'مسدس تدليك احترافي يخفف ألم العضلات ويسرّع الاستشفاء بعد التمارين الرياضية. يأتي بـ ٤ رؤوس تدليك مختلفة تناسب جميع مناطق الجسم و ٦ مستويات سرعة من الخفيف للعميق.\n\nيستخدمه الرياضيون والمحترفون حول العالم. هادئ الصوت (أقل من ٤٥ ديسيبل) مما يجعله مناسباً للاستخدام في أي وقت.\n\nالبطارية تدوم ٤ ساعات متواصلة بشحنة واحدة. يأتي بحقيبة حمل أنيقة تسهّل نقله للنادي أو السفر.',
+    seo_title_ar: 'مسدس تدليك العضلات – ٤ رؤوس و ٦ سرعات للاستشفاء السريع',
+    seo_description_ar: 'اشتري مسدس تدليك احترافي. ٤ رؤوس تدليك، ٦ سرعات، بطارية ٤ ساعات. مثالي للرياضيين. هادئ الصوت. توصيل سريع للسعودية.',
+    tags: ['مسدس تدليك', 'عضلات', 'رياضة', 'استشفاء', 'massage gun', 'جيم', 'لياقة'],
+  },
+  'Car Phone Holder': {
+    store_title_ar: 'حامل جوال للسيارة ٣٦٠ درجة',
+    store_title_en: 'Car Phone Holder – 360° Rotation Mount',
+    short_description_ar: 'حامل جوال متين للسيارة يدور ٣٦٠ درجة. تثبيت على المكيف أو الزجاج. يدعم جميع الأحجام.',
+    short_description_en: 'Sturdy car phone mount with 360° rotation. Vent or windshield mount. Fits all phones.',
+    full_description_ar: 'حامل جوال بتصميم متين ومرن يثبت على فتحة المكيف أو الزجاج الأمامي بقوة. يدعم جميع أحجام الجوالات من ٤ إلى ٧ إنش ويدور ٣٦٠ درجة لتختار الزاوية المثالية.\n\nمثالي للملاحة عبر خرائط قوقل وتطبيقات التوصيل والمكالمات الآمنة أثناء القيادة. نظام فتح وإغلاق بيد واحدة يسهّل الاستخدام.\n\nتصميم أنيق لا يحجب الرؤية. مادة مطاطية ناعمة تحمي جوالك من الخدوش.',
+    seo_title_ar: 'حامل جوال للسيارة ٣٦٠ درجة – تثبيت قوي لجميع الأحجام',
+    seo_description_ar: 'اشتري حامل جوال للسيارة يدور ٣٦٠ درجة. يثبت على المكيف أو الزجاج. يدعم جوالات ٤-٧ إنش. فتح بيد واحدة. توصيل سريع للسعودية.',
+    tags: ['حامل جوال', 'سيارة', 'قيادة آمنة', 'ملاحة', 'car mount', 'phone holder', 'إكسسوارات سيارة'],
+  },
+};
+
+function buildGenericListing(product: DiscoveryProduct): ProductListingContent {
+  const name = product.name;
+  const cat = product.category;
+  return {
+    store_title_ar: `${name} – جودة عالية وشحن سريع`,
+    store_title_en: `${name} – Premium Quality, Fast Shipping`,
+    short_description_ar: `${name} من فئة ${cat}. منتج عملي بجودة عالية وسعر منافس.`,
+    short_description_en: `${name} in ${cat} category. Practical product with high quality and competitive price.`,
+    full_description_ar: `${name} منتج عملي من فئة ${cat} مصمم لتلبية احتياجاتك اليومية. يتميز بجودة تصنيع ممتازة وسعر مناسب مقارنة بالمنتجات المنافسة.\n\nمناسب للاستخدام الشخصي أو كهدية مميزة. شحن سريع لجميع مناطق المملكة.\n\nنضمن لك جودة المنتج مع إمكانية الاستبدال في حال وجود أي عيب مصنعي.`,
+    seo_title_ar: `${name} – اطلبه الآن بأفضل سعر في السعودية`,
+    seo_description_ar: `اشتري ${name} بسعر منافس. جودة عالية من فئة ${cat}. توصيل سريع لجميع مناطق السعودية.`,
+    tags: [name, cat, 'شحن سريع', 'جودة عالية', 'سعر منافس', 'السعودية'],
+  };
+}
+
+function generateListingPack(product: DiscoveryProduct): ListingPack {
+  const content = PRODUCT_LISTING[product.name] ?? buildGenericListing(product);
+  const recommendedPrice = product.commerce?.recommended_price_sar ?? 0;
+  // compare_at_price: 15-25% above recommended to show a discount
+  const compareAtPrice = Math.round(recommendedPrice * 1.2 / 5) * 5;
+  const potentialLabel = product.commerce?.potential_label ?? getPotentialLabel(product.final_score);
+  const suggestedCategory = SUGGESTED_CATEGORIES[product.name] ??
+    CATEGORY_FALLBACK[product.category.toLowerCase()] ?? 'عام';
+
+  return {
+    store_title_ar: content.store_title_ar,
+    store_title_en: content.store_title_en,
+    short_description_ar: content.short_description_ar,
+    short_description_en: content.short_description_en,
+    full_description_ar: content.full_description_ar,
+    seo_title_ar: content.seo_title_ar,
+    seo_description_ar: content.seo_description_ar,
+    tags: content.tags,
+    suggested_category: suggestedCategory,
+    compare_at_price_sar: compareAtPrice,
+    sku_hint: generateSku(product),
+    stock_recommendation: STOCK_BY_LABEL[potentialLabel] ?? 12,
+  };
+}
+
+/**
+ * Attach listing packs to an array of discovered products.
+ * Should be called AFTER enrichWithCommerce so pricing data is available.
+ */
+export function enrichWithListingPack(products: DiscoveryProduct[]): number {
+  let enriched = 0;
+  for (const product of products) {
+    try {
+      product.listing_pack = generateListingPack(product);
+      enriched++;
+    } catch (err) {
+      logger.warn(`Listing pack generation failed for "${product.name}": ${err}`);
+    }
+  }
+  logger.info(`Listing pack enrichment: ${enriched}/${products.length} products enriched`);
   return enriched;
 }
