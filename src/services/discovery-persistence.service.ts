@@ -27,9 +27,16 @@ export async function persistDiscoveredProducts(
 
   for (const product of products) {
     try {
+      logger.info(`[persist] processing "${product.name}" source=${product.source} final_score=${product.final_score}`);
+
       const existing = await ProductRepo.findByNameAndSource(product.name, product.source);
 
       let productId: string;
+
+      // JSONB columns must be JSON.stringify'd for the pg driver
+      const keywordsJson = JSON.stringify(product.keywords || []);
+      const imageUrlsJson = JSON.stringify(product.image_url ? [product.image_url] : []);
+      const metadataJson = JSON.stringify(product.metadata || {});
 
       if (existing && existing.id) {
         // Update existing product with latest scores
@@ -37,11 +44,12 @@ export async function persistDiscoveredProducts(
           virality_score: product.virality_score,
           impulse_buy_score: product.impulse_buy_score,
           saudi_relevance_score: product.saudi_relevance_score,
-          keywords: product.keywords as any,
-          metadata: product.metadata as any,
+          keywords: keywordsJson as any,
+          metadata: metadataJson as any,
         });
         productId = existing.id;
         summary.updated++;
+        logger.info(`[persist] updated existing product "${product.name}" id=${productId}`);
       } else {
         // Create new product
         productId = await ProductRepo.create({
@@ -54,13 +62,14 @@ export async function persistDiscoveredProducts(
           virality_score: product.virality_score,
           impulse_buy_score: product.impulse_buy_score,
           saudi_relevance_score: product.saudi_relevance_score,
-          image_urls: product.image_url ? [product.image_url] : [],
-          keywords: product.keywords as any,
+          image_urls: imageUrlsJson as any,
+          keywords: keywordsJson as any,
           status: 'discovered',
           discovered_at: new Date(),
-          metadata: product.metadata as any,
+          metadata: metadataJson as any,
         });
         summary.saved++;
+        logger.info(`[persist] created new product "${product.name}" id=${productId}`);
       }
 
       summary.productIds.push(productId);
@@ -80,11 +89,12 @@ export async function persistDiscoveredProducts(
           scored_at: new Date(),
         });
         summary.scored++;
+        logger.info(`[persist] scored product "${product.name}" final_score=${product.final_score}`);
       } catch (scoreErr) {
-        logger.warn(`Failed to upsert score for product ${productId}: ${scoreErr}`);
+        logger.warn(`[persist] FAILED to upsert score for product ${productId}: ${scoreErr}`);
       }
     } catch (err) {
-      logger.warn(`Failed to persist product "${product.name}": ${err}`);
+      logger.warn(`[persist] FAILED to persist product "${product.name}": ${err}`);
       summary.skipped++;
     }
   }

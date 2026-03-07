@@ -3,7 +3,7 @@ import { discoverFromAmazon } from '../discovery/amazon';
 import { discoverFromTikTok } from '../discovery/tiktok';
 import { DiscoveredProduct } from '../discovery/types';
 import { dedupeProducts } from '../discovery/utils';
-import { filterByRelevance } from '../utils/keyword-relevance';
+import { filterByRelevance, scoreKeywordRelevance } from '../utils/keyword-relevance';
 import { persistDiscoveredProducts, PersistenceSummary } from './discovery-persistence.service';
 import { generateMarketingForProducts } from './discovery-marketing.service';
 import logger from '../utils/logger';
@@ -77,7 +77,16 @@ export class DiscoveryOrchestratorService {
     const deduped = dedupeProducts(raw);
     logger.info(`discover-live: after dedup: ${deduped.length}`);
 
-    // Step 3: Filter by keyword relevance
+    // Step 3: Filter by keyword relevance (with debug logging per product)
+    for (const p of deduped) {
+      for (const kw of seedKeywords) {
+        const score = scoreKeywordRelevance(kw, p.name, p.category, p.keywords);
+        logger.info(
+          `[relevance] product="${p.name}" keyword="${kw}" relevance=${score} ${score >= MIN_RELEVANCE ? 'ACCEPTED' : 'REJECTED'}`,
+        );
+      }
+    }
+
     const relevant = filterByRelevance(deduped, seedKeywords, MIN_RELEVANCE);
     logger.info(`discover-live: after relevance filter (>=${MIN_RELEVANCE}): ${relevant.length}`);
 
@@ -112,8 +121,10 @@ export class DiscoveryOrchestratorService {
               }
             }
 
+            logger.info(`[marketing] productIdMap entries: ${productIdMap.size}, products with score>=70: ${accepted.filter(p => p.final_score >= 70).length}`);
             const marketing = await generateMarketingForProducts(accepted, productIdMap);
             result.marketing_generated = marketing.generated;
+            logger.info(`[marketing] generated=${marketing.generated} skipped=${marketing.skipped}`);
           } catch (marketingErr) {
             logger.warn(`discover-live: marketing generation failed gracefully: ${marketingErr}`);
           }
