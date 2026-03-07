@@ -23,12 +23,16 @@ export async function discoverFromTikTok(keywords: string[]): Promise<Discovered
   const results: DiscoveredProduct[] = [];
 
   for (const keyword of keywords) {
+    const kwTokens = keyword.toLowerCase().split(/\s+/).filter(Boolean);
+
     const filtered = mockPool.filter((p) => {
       const haystack = `${p.name} ${p.category}`.toLowerCase();
-      return haystack.includes(keyword.toLowerCase()) || keyword.length < 4;
+      // Require at least one keyword token to appear in product name/category
+      return kwTokens.some((t) => haystack.includes(t));
     });
 
-    const sourceItems = filtered.length ? filtered : mockPool.slice(0, 3);
+    // No blind fallback — if nothing matches, skip this keyword
+    const sourceItems = filtered;
 
     for (const item of sourceItems) {
       const saudi = estimateSaudiRelevance(item.name, item.category, [keyword]);
