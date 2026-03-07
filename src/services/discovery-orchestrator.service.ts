@@ -5,7 +5,7 @@ import { DiscoveredProduct } from '../discovery/types';
 import { dedupeProducts } from '../discovery/utils';
 import { filterByRelevance, scoreKeywordRelevance } from '../utils/keyword-relevance';
 import { persistDiscoveredProducts, PersistenceSummary } from './discovery-persistence.service';
-import { generateMarketingForProducts } from './discovery-marketing.service';
+import { generateMarketingForProducts, enrichWithCommerce } from './discovery-marketing.service';
 import logger from '../utils/logger';
 
 const MIN_RELEVANCE = Number(process.env.DISCOVERY_MIN_RELEVANCE) || 55;
@@ -150,6 +150,18 @@ export class DiscoveryOrchestratorService {
       } catch (persistErr: any) {
         const msg = `persistence failed: ${persistErr?.message || persistErr}`;
         logger.error(`discover-live: ${msg}`);
+        allErrors.push(msg);
+      }
+    }
+
+    // Step 6: Enrich with commerce packages
+    if (accepted.length > 0) {
+      try {
+        const commerceCount = await enrichWithCommerce(accepted);
+        logger.info(`discover-live: commerce packages generated: ${commerceCount}`);
+      } catch (commerceErr: any) {
+        const msg = `commerce enrichment failed: ${commerceErr?.message || commerceErr}`;
+        logger.warn(`discover-live: ${msg}`);
         allErrors.push(msg);
       }
     }

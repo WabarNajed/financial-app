@@ -1,5 +1,5 @@
 import { MarketingRepo } from '../database/repositories';
-import { DiscoveredProduct as DiscoveryProduct } from '../discovery/types';
+import { DiscoveredProduct as DiscoveryProduct, CommercePackage, TikTokAdScript } from '../discovery/types';
 import { env } from '../config';
 import logger from '../utils/logger';
 
@@ -172,4 +172,227 @@ export async function generateMarketingForProducts(
   );
 
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Commerce Package Generation
+// ---------------------------------------------------------------------------
+
+const USD_TO_SAR = 3.75;
+const SHIPPING_SAR = 15;
+const MARGIN_MULTIPLIER = 2.2; // targets ~60-120% margin
+
+function computePricing(priceUsd: number | null | undefined) {
+  const costSar = (priceUsd ?? 10) * USD_TO_SAR + SHIPPING_SAR;
+  const recommendedPriceSar = Math.round(costSar * MARGIN_MULTIPLIER);
+  const estimatedProfitSar = recommendedPriceSar - Math.round(costSar);
+  return {
+    estimated_cost_sar: Math.round(costSar),
+    recommended_price_sar: recommendedPriceSar,
+    estimated_profit_sar: estimatedProfitSar,
+  };
+}
+
+function getPotentialLabel(score: number): string {
+  if (score >= 80) return 'High Potential';
+  if (score >= 70) return 'Good Test Product';
+  if (score >= 60) return 'Medium Potential';
+  return 'Low Priority';
+}
+
+// ---- Product-aware Arabic content maps ----
+
+interface ProductTemplate {
+  titleTemplate: (name: string) => string;
+  description: (name: string) => string;
+  features: string[];
+  adScript: TikTokAdScript;
+}
+
+const CATEGORY_TEMPLATES: Record<string, ProductTemplate> = {
+  kitchen: {
+    titleTemplate: (n) => `${n} – مثالي للمطبخ والسفر`,
+    description: (n) => `${n} هو الحل العملي لتحضير مشروباتك المفضلة في أي مكان. تصميم صغير وخفيف يناسب حياتك اليومية. مثالي للرياضة والسفر والمنزل.`,
+    features: ['سهل الحمل', 'يعمل عبر USB', 'مناسب للمنزل والسفر', 'تصميم أنيق وعملي'],
+    adScript: {
+      hook: 'هل تعبت من حمل الأجهزة الكبيرة؟',
+      problem: 'في السفر أو النادي ما عندك وسيلة سريعة لتحضير مشروبك.',
+      demo: 'بهذا الجهاز المحمول تقدر تحضر أي شيء في ثوانٍ!',
+      cta: 'اطلبه الآن قبل نفاد الكمية 🔥',
+    },
+  },
+  fitness: {
+    titleTemplate: (n) => `${n} – لراحة العضلات بعد التمرين`,
+    description: (n) => `${n} يساعدك على الاسترخاء وتخفيف آلام العضلات بعد التمارين الرياضية. مناسب للرياضيين والمحترفين. سهل الاستخدام في المنزل أو النادي.`,
+    features: ['عدة مستويات للقوة', 'هادئ الصوت', 'بطارية تدوم طويلاً', 'خفيف وسهل الحمل'],
+    adScript: {
+      hook: 'عضلاتك متعبة بعد التمرين؟',
+      problem: 'ألم العضلات يمنعك من الاستمرار في التمارين.',
+      demo: 'بهذا الجهاز تحصل على تدليك احترافي في بيتك!',
+      cta: 'اطلبه الآن واستمتع براحة فورية 💪',
+    },
+  },
+  beauty: {
+    titleTemplate: (n) => `${n} – العناية بالبشرة بسهولة`,
+    description: (n) => `${n} أداة مثالية للعناية بالبشرة. يساعد على تهدئة البشرة وتقليل الانتفاخ وشد المسام. مناسب للاستخدام اليومي في المنزل.`,
+    features: ['يهدئ البشرة فوراً', 'يقلل الانتفاخ', 'سهل الاستخدام', 'مناسب لجميع أنواع البشرة'],
+    adScript: {
+      hook: 'بشرتك تحتاج عناية خاصة؟',
+      problem: 'الانتفاخ والإرهاق يظهرون على وجهك.',
+      demo: 'بهذه الأداة البسيطة تحصلين على بشرة نضرة في دقائق!',
+      cta: 'اطلبيه الآن وجربي الفرق ✨',
+    },
+  },
+  automotive: {
+    titleTemplate: (n) => `${n} – إكسسوار ذكي لسيارتك`,
+    description: (n) => `${n} يضيف لمسة عملية لسيارتك. تصميم أنيق وتركيب سهل. مناسب لجميع أنواع السيارات ويجعل قيادتك أكثر راحة.`,
+    features: ['تركيب سهل وسريع', 'متوافق مع جميع السيارات', 'تصميم أنيق', 'متين وعملي'],
+    adScript: {
+      hook: 'سيارتك تحتاج هذا الإكسسوار!',
+      problem: 'استخدام الجوال أثناء القيادة خطير ومزعج.',
+      demo: 'بهذا المنتج تقدر تستخدم جوالك بأمان وسهولة!',
+      cta: 'اطلبه الآن واجعل قيادتك أفضل 🚗',
+    },
+  },
+  'smart home': {
+    titleTemplate: (n) => `${n} – أجواء مميزة لبيتك`,
+    description: (n) => `${n} يحول غرفتك إلى تجربة بصرية مذهلة. سهل التشغيل ومناسب لجميع الغرف. هدية مثالية لمحبي الأجواء المميزة.`,
+    features: ['إضاءة متعددة الألوان', 'تشغيل سهل', 'مناسب لجميع الغرف', 'هدية مثالية'],
+    adScript: {
+      hook: 'غرفتك تحتاج أجواء جديدة؟',
+      problem: 'الإضاءة العادية مملة وما تعطي الجو المطلوب.',
+      demo: 'بهذا الجهاز تحول غرفتك إلى تجربة سينمائية!',
+      cta: 'اطلبه الآن وغير جو بيتك 🌟',
+    },
+  },
+};
+
+const DEFAULT_TEMPLATE: ProductTemplate = {
+  titleTemplate: (n) => `${n} – منتج مميز وعملي`,
+  description: (n) => `${n} منتج عملي ومميز يناسب احتياجاتك اليومية. جودة عالية بسعر مناسب. مثالي كهدية أو للاستخدام الشخصي.`,
+  features: ['جودة عالية', 'سعر مناسب', 'شحن سريع', 'تصميم عملي'],
+  adScript: {
+    hook: 'شفت هذا المنتج؟',
+    problem: 'كثير ناس يدورون على منتج عملي بسعر معقول.',
+    demo: 'هذا المنتج يجمع بين الجودة والسعر المناسب!',
+    cta: 'اطلبه الآن والكمية محدودة 🔥',
+  },
+};
+
+function matchCategory(category: string): ProductTemplate {
+  const cat = category.toLowerCase();
+  for (const [key, tpl] of Object.entries(CATEGORY_TEMPLATES)) {
+    if (cat.includes(key)) return tpl;
+  }
+  return DEFAULT_TEMPLATE;
+}
+
+function generateFallbackCommerce(product: DiscoveryProduct): CommercePackage {
+  const pricing = computePricing(product.price);
+  const tpl = matchCategory(product.category);
+
+  return {
+    arabic_title: tpl.titleTemplate(product.name),
+    ...pricing,
+    description_ar: tpl.description(product.name),
+    features: tpl.features,
+    tiktok_ad_script: tpl.adScript,
+    potential_label: getPotentialLabel(product.final_score),
+  };
+}
+
+async function generateOpenAICommerce(product: DiscoveryProduct): Promise<CommercePackage | null> {
+  try {
+    const { default: OpenAI } = await import('openai');
+    const client = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+
+    const pricing = computePricing(product.price);
+
+    const prompt = `You are a Saudi e-commerce expert specializing in dropshipping.
+Generate a commerce package for this product:
+Name: ${product.name}
+Category: ${product.category}
+Price (USD): ${product.price ?? 'unknown'}
+Score: ${product.final_score}/100
+
+Pricing (pre-calculated):
+  estimated_cost_sar: ${pricing.estimated_cost_sar}
+  recommended_price_sar: ${pricing.recommended_price_sar}
+  estimated_profit_sar: ${pricing.estimated_profit_sar}
+
+Return ONLY valid JSON:
+{
+  "arabic_title": "Arabic store-ready title (6-10 words, optimized for ecommerce)",
+  "description_ar": "Arabic store description (3-4 sentences, simple, persuasive, clear)",
+  "features": ["4 bullet points in Arabic"],
+  "tiktok_ad_script": {
+    "hook": "Arabic hook line",
+    "problem": "Arabic problem statement",
+    "demo": "Arabic demo/solution",
+    "cta": "Arabic call to action"
+  }
+}`;
+
+    const response = await client.chat.completions.create({
+      model: env.OPENAI_MODEL || 'gpt-4o',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.7,
+      max_tokens: 700,
+    });
+
+    const raw = response.choices?.[0]?.message?.content?.trim();
+    if (!raw) return null;
+
+    const jsonStr = raw.replace(/```json?\s*/g, '').replace(/```/g, '').trim();
+    const parsed = JSON.parse(jsonStr);
+
+    return {
+      arabic_title: parsed.arabic_title || '',
+      ...pricing,
+      description_ar: parsed.description_ar || '',
+      features: Array.isArray(parsed.features) ? parsed.features.slice(0, 4) : [],
+      tiktok_ad_script: {
+        hook: parsed.tiktok_ad_script?.hook || '',
+        problem: parsed.tiktok_ad_script?.problem || '',
+        demo: parsed.tiktok_ad_script?.demo || '',
+        cta: parsed.tiktok_ad_script?.cta || '',
+      },
+      potential_label: getPotentialLabel(product.final_score),
+    };
+  } catch (err) {
+    logger.warn(`OpenAI commerce generation failed for "${product.name}": ${err}`);
+    return null;
+  }
+}
+
+/**
+ * Generate a commerce package for a single product.
+ * Uses OpenAI if available, otherwise deterministic fallback.
+ */
+async function generateCommercePackage(product: DiscoveryProduct): Promise<CommercePackage> {
+  if (env.OPENAI_API_KEY) {
+    const aiResult = await generateOpenAICommerce(product);
+    if (aiResult) return aiResult;
+    logger.info(`Falling back to deterministic commerce for "${product.name}"`);
+  }
+  return generateFallbackCommerce(product);
+}
+
+/**
+ * Attach commerce packages to an array of discovered products.
+ * Mutates each product by setting product.commerce.
+ * Returns the count of products enriched.
+ */
+export async function enrichWithCommerce(products: DiscoveryProduct[]): Promise<number> {
+  let enriched = 0;
+  for (const product of products) {
+    try {
+      product.commerce = await generateCommercePackage(product);
+      enriched++;
+    } catch (err) {
+      logger.warn(`Commerce generation failed for "${product.name}": ${err}`);
+    }
+  }
+  logger.info(`Commerce enrichment: ${enriched}/${products.length} products enriched`);
+  return enriched;
 }
