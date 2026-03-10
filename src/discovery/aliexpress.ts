@@ -8,9 +8,17 @@ import {
   makeId,
   scoreFinal,
 } from './utils';
+import logger from '../utils/logger';
 
 const RAPID_HOST = process.env.RAPIDAPI_HOST || 'alibaba-datahub.p.rapidapi.com';
 const RAPID_KEY = process.env.RAPIDAPI_KEY || '';
+
+// Log discovery mode once at module load
+if (RAPID_KEY) {
+  logger.info('[aliexpress] Discovery mode: RapidAPI live search');
+} else {
+  logger.info('[aliexpress] Discovery mode: mock fallback pool (set RAPIDAPI_KEY for live data)');
+}
 
 async function tryRapidApiSample(keyword: string): Promise<DiscoveredProduct[]> {
   if (!RAPID_KEY) return [];

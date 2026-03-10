@@ -2,8 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
-import { env } from './config';
-import { testConnection } from './database/connection';
+import { env, printStartupDiagnostics, getIntegrationStatuses } from './config';
+import { testConnection, isDatabaseAvailable } from './database/connection';
 import { adminAuth } from './api/middleware/auth';
 import productRoutes from './api/routes/products';
 import workflowRoutes from './api/routes/workflows';
@@ -27,9 +27,38 @@ app.use(rateLimit({
   legacyHeaders: false,
 }));
 
-// Health check (no auth)
-app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+// Health check (no auth) — includes DB and integration status
+app.get('/health', async (_req, res) => {
+  const dbUp = isDatabaseAvailable();
+  const integrations = getIntegrationStatuses();
+
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    environment: env.NODE_ENV,
+    database: dbUp ? 'connected' : 'unavailable',
+    integrations: integrations.map((i) => ({
+      name: i.name,
+      status: i.status,
+    })),
+  });
+});
+
+// Also expose under API prefix for convenience
+app.get(`${env.API_PREFIX}/health`, async (_req, res) => {
+  const dbUp = isDatabaseAvailable();
+  const integrations = getIntegrationStatuses();
+
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    environment: env.NODE_ENV,
+    database: dbUp ? 'connected' : 'unavailable',
+    integrations: integrations.map((i) => ({
+      name: i.name,
+      status: i.status,
+    })),
+  });
 });
 
 // API routes (authenticated)
@@ -56,15 +85,19 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 
 // Start server
 async function start() {
+  // Print startup diagnostics
+  printStartupDiagnostics();
+
   const dbReady = await testConnection();
   if (!dbReady) {
-    logger.warn('Database not available. API will start but database operations will fail.');
+    logger.warn('Database not available. API will start but database operations will fail gracefully.');
   }
 
   app.listen(env.PORT, () => {
     logger.info(`Saudi Dropshipping Agent API running on port ${env.PORT}`);
     logger.info(`API prefix: ${env.API_PREFIX}`);
     logger.info(`Environment: ${env.NODE_ENV}`);
+    logger.info(`Health check: http://localhost:${env.PORT}/health`);
   });
 }
 
