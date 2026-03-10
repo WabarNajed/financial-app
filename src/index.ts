@@ -11,6 +11,7 @@ import marketingRoutes from './api/routes/marketing';
 import sallaRoutes from './api/routes/salla';
 import dashboardRoutes from './api/routes/dashboard';
 import exportRoutes from './api/routes/export';
+import adminRoutes from './api/routes/admin';
 import logger from './utils/logger';
 
 const app = express();
@@ -71,6 +72,7 @@ api.use('/marketing', marketingRoutes);
 api.use('/salla', sallaRoutes);
 api.use('/dashboard', dashboardRoutes);
 api.use('/export', exportRoutes);
+api.use('/admin', adminRoutes);
 
 app.use(env.API_PREFIX, api);
 
