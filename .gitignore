@@ -7,3 +7,5 @@ coverage/
 .DS_Store
 dashboard/.next/
 dashboard/node_modules/
+admin/node_modules/
+admin/.next/
