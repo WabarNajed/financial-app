@@ -238,12 +238,17 @@ export default function ProductEditor() {
             <div style={{ display: 'flex', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
               <div><label>Status</label><div style={{ marginTop: 4 }}>{statusBadge(status)}</div></div>
             </div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
               {status !== 'approved' && <button className="btn btn-success" onClick={approve}>Approve</button>}
               {status !== 'rejected' && <button className="btn btn-danger" onClick={reject}>Reject</button>}
               <button className="btn btn-outline" onClick={rebuild}>Rebuild Export Data</button>
               <button className="btn btn-outline" onClick={previewExport}>View Export Preview</button>
               <button className="btn btn-outline" onClick={copyExportJSON}>Copy Export JSON</button>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="btn btn-primary" onClick={async () => { try { await api.generateCreatives(id); notify('Creatives generated'); load(); } catch (e: any) { notify(e.message, 'error'); } }}>Generate Ad Creatives</button>
+              <button className="btn btn-outline" onClick={async () => { try { await api.rebuildImages(id); notify('Images rebuilt'); load(); } catch (e: any) { notify(e.message, 'error'); } }}>Rebuild Images</button>
+              <button className="btn btn-outline" onClick={async () => { try { await api.createCampaign({ product_id: id, platform: 'tiktok', budget: 50 }); notify('Campaign created — go to Ads page'); } catch (e: any) { notify(e.message, 'error'); } }}>Create Ad Campaign</button>
             </div>
             {exportPreview && (
               <div style={{ marginTop: 16 }}>

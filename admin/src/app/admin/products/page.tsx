@@ -6,12 +6,18 @@ import { api } from '@/lib/api';
 interface Product {
   id: string; name: string; category: string; source: string; status: string;
   final_score: number; updated_at: string; has_commerce: boolean; has_listing_pack: boolean;
+  has_creatives: boolean; primary_image_url: string | null;
   recommended_price_sar: number | null; gross_margin_percent: number | null;
 }
 
 function statusBadge(s: string) {
   const map: Record<string, string> = { approved: 'badge-green', rejected: 'badge-red', discovered: 'badge-blue', analyzed: 'badge-yellow', pushed_to_salla: 'badge-green', failed: 'badge-red' };
   return <span className={`badge ${map[s] || 'badge-gray'}`}>{s}</span>;
+}
+
+function Thumb({ url }: { url: string | null }) {
+  if (!url) return <div style={{ width: 36, height: 36, background: 'var(--bg3)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: 'var(--text2)', flexShrink: 0 }}>📦</div>;
+  return <img src={url} alt="" style={{ width: 36, height: 36, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }} />;
 }
 
 export default function ProductList() {
@@ -98,18 +104,19 @@ export default function ProductList() {
         <table>
           <thead>
             <tr>
-              <th>Product</th><th>Category</th><th>Source</th><th>Score</th>
-              <th>Status</th><th>Export</th><th>Price (SAR)</th><th>Margin</th><th>Updated</th>
+              <th style={{width:50}}></th><th>Product</th><th>Category</th><th>Source</th><th>Score</th>
+              <th>Status</th><th>Export</th><th>Ads</th><th>Price (SAR)</th><th>Updated</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={9} style={{ textAlign: 'center', padding: 40 }}>Loading...</td></tr>
+              <tr><td colSpan={10} style={{ textAlign: 'center', padding: 40 }}>Loading...</td></tr>
             ) : products.length === 0 ? (
-              <tr><td colSpan={9} style={{ textAlign: 'center', padding: 40, color: 'var(--text2)' }}>No products found</td></tr>
+              <tr><td colSpan={10} style={{ textAlign: 'center', padding: 40, color: 'var(--text2)' }}>No products found</td></tr>
             ) : products.map((p) => (
               <tr key={p.id} onClick={() => router.push(`/admin/products/${p.id}`)}>
-                <td style={{ fontWeight: 500, maxWidth: 250, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</td>
+                <td><Thumb url={p.primary_image_url} /></td>
+                <td style={{ fontWeight: 500, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</td>
                 <td>{p.category}</td>
                 <td><span className="badge badge-blue">{p.source}</span></td>
                 <td>
@@ -119,14 +126,10 @@ export default function ProductList() {
                 </td>
                 <td>{statusBadge(p.status)}</td>
                 <td>
-                  {p.has_commerce && p.has_listing_pack ? (
-                    <span className="badge badge-green">Ready</span>
-                  ) : (
-                    <span className="badge badge-gray">Missing</span>
-                  )}
+                  {p.has_commerce && p.has_listing_pack ? <span className="badge badge-green">Ready</span> : <span className="badge badge-gray">Missing</span>}
                 </td>
+                <td>{p.has_creatives ? <span className="badge badge-green">Yes</span> : <span className="badge badge-gray">No</span>}</td>
                 <td>{p.recommended_price_sar ? `${p.recommended_price_sar} SAR` : '—'}</td>
-                <td>{p.gross_margin_percent ? `${p.gross_margin_percent}%` : '—'}</td>
                 <td style={{ fontSize: 12, color: 'var(--text2)' }}>{p.updated_at ? new Date(p.updated_at).toLocaleDateString() : '—'}</td>
               </tr>
             ))}
