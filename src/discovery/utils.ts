@@ -31,7 +31,7 @@ export function scoreFinal(input: {
     input.saudi_relevance_score * 0.10 +
     input.impulse_buy_score * 0.06;
 
-  return Number(clamp(finalScore).toFixed(2));
+  return Math.round(clamp(finalScore) * 100) / 100;
 }
 
 export function normalizeKeyword(keyword: string): string {
@@ -110,7 +110,7 @@ export function estimateImpulseBuy(price?: number | null, virality = 60): number
 
   score += (virality - 50) * 0.3;
 
-  return Number(clamp(score).toFixed(2));
+  return Math.round(clamp(score) * 100) / 100;
 }
 
 export function estimateMargin(price?: number | null): number {
@@ -133,5 +133,5 @@ export function estimateCompetition(source: string, reviewCount?: number | null)
   else if ((reviewCount ?? 0) > 1000) score += 10;
   else if ((reviewCount ?? 0) < 100) score -= 5;
 
-  return Number(clamp(score).toFixed(2));
+  return Math.round(clamp(score) * 100) / 100;
 }

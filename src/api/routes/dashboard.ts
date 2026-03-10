@@ -33,7 +33,7 @@ router.get('/stats', async (_req: Request, res: Response) => {
         }, {}),
         top_products: topScored,
         recent_workflows: recentWorkflows,
-        average_score: avgScore?.avg_score ? Number(Number(avgScore.avg_score).toFixed(1)) : null,
+        average_score: avgScore?.avg_score ? Math.round(Number(avgScore.avg_score) * 10) / 10 : null,
       },
     });
   } catch (error) {
