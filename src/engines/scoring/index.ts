@@ -49,7 +49,7 @@ export class ProductScoringEngine {
     };
 
     await ProductScoreRepo.upsert(productScore);
-    logger.info(`Product ${productId} scored: ${finalScore.toFixed(1)}/100`);
+    logger.info(`Product ${productId} scored: ${(Math.round(Number(finalScore) * 10) / 10)}/100`);
 
     return productScore;
   }

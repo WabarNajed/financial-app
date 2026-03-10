@@ -14,6 +14,7 @@ import { AliExpressDiscoveryEngine } from '../../services/aliexpress-discovery.s
 import { AmazonDiscoveryEngine } from '../../services/amazon-discovery.service';
 import { GoogleTrendsDiscoveryEngine } from '../../services/trends-discovery.service';
 import logger from '../../utils/logger';
+import { toNumber, normalizeCampaignRow } from '../../utils/number-safe';
 
 const router = Router();
 const approvalService = new ApprovalService();
@@ -121,10 +122,11 @@ router.get('/products/:id', async (req: Request, res: Response) => {
     const meta = typeof product.metadata === 'string' ? JSON.parse(product.metadata) : (product.metadata || {});
     const imageUrls = typeof product.image_urls === 'string' ? JSON.parse(product.image_urls) : (product.image_urls || []);
 
-    // Fetch ad campaigns for this product
+    // Fetch ad campaigns for this product (normalize DECIMAL strings)
     let campaigns: any[] = [];
     try {
-      campaigns = await db('ad_campaigns').where({ product_id: req.params.id }).orderBy('created_at', 'desc');
+      const rawCampaigns = await db('ad_campaigns').where({ product_id: req.params.id }).orderBy('created_at', 'desc');
+      campaigns = rawCampaigns.map(normalizeCampaignRow);
     } catch { /* table may not exist yet */ }
 
     res.json({
@@ -354,7 +356,7 @@ router.get('/campaigns', async (_req: Request, res: Response) => {
       )
       .orderBy('ad_campaigns.created_at', 'desc')
       .limit(100);
-    res.json({ data: campaigns });
+    res.json({ data: campaigns.map(normalizeCampaignRow) });
   } catch (error: any) {
     logger.error(`[admin] GET /campaigns error: ${error?.message}`);
     res.status(500).json({ error: 'Failed to fetch campaigns' });
@@ -371,14 +373,15 @@ router.post('/campaigns', async (req: Request, res: Response) => {
       product_id,
       creative_id: creative_id || null,
       platform,
-      budget,
+      budget: toNumber(budget, 50),
       status: 'draft',
       scaling_stage: 'testing',
       created_at: new Date(),
       updated_at: new Date(),
     }).returning('*');
 
-    res.json({ success: true, campaign: row });
+    logger.info(`[campaign] created id=${row.id} product=${product_id} platform=${platform} budget=${toNumber(budget, 50)}`);
+    res.json({ success: true, campaign: normalizeCampaignRow(row) });
   } catch (error: any) {
     logger.error(`[admin] POST /campaigns error: ${error?.message}`);
     res.status(500).json({ error: 'Failed to create campaign' });
@@ -391,8 +394,9 @@ router.post('/campaigns/:id/launch', async (req: Request, res: Response) => {
     const campaign = await db('ad_campaigns').where({ id: req.params.id }).first();
     if (!campaign) { res.status(404).json({ error: 'Campaign not found' }); return; }
 
-    // Simulate ad performance
-    const perf = simulateAdPerformance(campaign.budget || 50);
+    // Normalize DB row (budget may be string from DECIMAL column)
+    const safeCampaign = normalizeCampaignRow(campaign);
+    const perf = simulateAdPerformance(safeCampaign.budget);
 
     await db('ad_campaigns').where({ id: req.params.id }).update({
       status: 'testing',
@@ -400,9 +404,11 @@ router.post('/campaigns/:id/launch', async (req: Request, res: Response) => {
       updated_at: new Date(),
     });
 
-    const updated = await db('ad_campaigns').where({ id: req.params.id }).first();
+    const updated = normalizeCampaignRow(await db('ad_campaigns').where({ id: req.params.id }).first());
     const decision = evaluateCampaign(updated);
     const stage = getScalingStage(updated);
+
+    logger.info(`[campaign] launched id=${req.params.id} ctr=${perf.ctr}% roas=${perf.roas} stage=${stage}`);
 
     res.json({
       success: true,
@@ -423,14 +429,17 @@ router.post('/campaigns/:id/simulate', async (req: Request, res: Response) => {
     const campaign = await db('ad_campaigns').where({ id: req.params.id }).first();
     if (!campaign) { res.status(404).json({ error: 'Campaign not found' }); return; }
 
-    const perf = simulateAdPerformance(campaign.budget || 50);
+    const safeCampaign = normalizeCampaignRow(campaign);
+    const perf = simulateAdPerformance(safeCampaign.budget);
     await db('ad_campaigns').where({ id: req.params.id }).update({
       ...perf,
       updated_at: new Date(),
     });
 
-    const updated = await db('ad_campaigns').where({ id: req.params.id }).first();
+    const updated = normalizeCampaignRow(await db('ad_campaigns').where({ id: req.params.id }).first());
     const decision = evaluateCampaign(updated);
+
+    logger.info(`[campaign] simulated id=${req.params.id} ctr=${perf.ctr}% roas=${perf.roas}`);
 
     res.json({ campaign: updated, performance: perf, optimization: decision });
   } catch (error: any) {
