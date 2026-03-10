@@ -4,6 +4,7 @@ import { OrchestratorService } from '../../services/orchestrator.service';
 import { ApprovalService } from '../../services/approval.service';
 import { ArabicContentGenerator } from '../../integrations/content';
 import { MarketingService } from '../../marketing';
+import { rebuildExportData, rebuildMissingExportData } from '../../services/export-rebuild.service';
 import logger from '../../utils/logger';
 
 const router = Router();
@@ -68,6 +69,18 @@ router.get('/:id', async (req: Request, res: Response) => {
   } catch (error) {
     logger.error(`GET /products/:id error: ${error}`);
     res.status(500).json({ error: 'Failed to fetch product details' });
+  }
+});
+
+// Bulk rebuild missing export metadata (must be before /:id routes)
+router.post('/rebuild-missing-export-data', async (_req: Request, res: Response) => {
+  try {
+    logger.info('[rebuild-bulk] starting bulk rebuild of missing export metadata');
+    const result = await rebuildMissingExportData();
+    res.json(result);
+  } catch (error: any) {
+    logger.error(`POST /products/rebuild-missing-export-data error: ${error}`);
+    res.status(500).json({ success: false, error: 'Bulk rebuild failed', details: error?.message });
   }
 });
 
@@ -149,6 +162,26 @@ router.post('/:id/reject', async (req: Request, res: Response) => {
   } catch (error) {
     logger.error(`POST /products/:id/reject error: ${error}`);
     res.status(500).json({ error: 'Rejection failed' });
+  }
+});
+
+// Rebuild export metadata for a single product
+router.post('/:id/rebuild-export-data', async (req: Request, res: Response) => {
+  try {
+    logger.info(`[rebuild] rebuilding export data for product ${req.params.id}`);
+    const result = await rebuildExportData(req.params.id);
+    if (!result.success && result.error?.includes('not found')) {
+      res.status(404).json(result);
+      return;
+    }
+    if (!result.success) {
+      res.status(500).json(result);
+      return;
+    }
+    res.json(result);
+  } catch (error: any) {
+    logger.error(`POST /products/:id/rebuild-export-data error: ${error}`);
+    res.status(500).json({ success: false, product_id: req.params.id, error: 'Rebuild failed', details: error?.message });
   }
 });
 
