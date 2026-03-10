@@ -6,6 +6,7 @@ import { dedupeProducts } from '../discovery/utils';
 import { filterByRelevance, scoreKeywordRelevance } from '../utils/keyword-relevance';
 import { persistDiscoveredProducts, PersistenceSummary } from './discovery-persistence.service';
 import { generateMarketingForProducts, enrichWithCommerce, enrichWithListingPack } from './discovery-marketing.service';
+import { getDb } from '../database/connection';
 import logger from '../utils/logger';
 
 const MIN_RELEVANCE = Number(process.env.DISCOVERY_MIN_RELEVANCE) || 55;
@@ -119,22 +120,21 @@ export class DiscoveryOrchestratorService {
           allErrors.push(...persistence.errors);
         }
 
+        // Map DB IDs back to in-memory products (needed for marketing + metadata update)
+        if (persistence.productIds.length > 0) {
+          for (let i = 0; i < persistence.productIds.length; i++) {
+            if (persistence.productIds[i] && accepted[i]) {
+              accepted[i].id = persistence.productIds[i];
+            }
+          }
+        }
+
         // Step 5: Generate marketing assets
         if (generateMarketing && persistence.productIds.length > 0) {
           try {
-            // Build name→DB ID map from persistence
             const productIdMap = new Map<string, string>();
             for (const product of accepted) {
-              const idx = accepted.indexOf(product);
-              if (persistence.productIds[idx]) {
-                productIdMap.set(product.name, persistence.productIds[idx]);
-              }
-            }
-            // Also try matching by name for products that were updated (index might differ)
-            for (let i = 0; i < persistence.productIds.length; i++) {
-              if (persistence.productIds[i] && accepted[i]) {
-                productIdMap.set(accepted[i].name, persistence.productIds[i]);
-              }
+              if (product.id) productIdMap.set(product.name, product.id);
             }
 
             logger.info(`[marketing] productIdMap entries: ${productIdMap.size}, products with score>=70: ${accepted.filter(p => p.final_score >= 70).length}`);
@@ -173,6 +173,27 @@ export class DiscoveryOrchestratorService {
         const msg = `listing pack enrichment failed: ${listingErr?.message || listingErr}`;
         logger.warn(`discover-live: ${msg}`);
         allErrors.push(msg);
+      }
+
+      // Step 8: Persist commerce + listing_pack into product metadata (for Salla export)
+      if (save) {
+        try {
+          const db = getDb();
+          for (const product of accepted) {
+            if (!product.id) continue;
+            const existing = (typeof product.metadata === 'object' ? product.metadata : {}) || {};
+            const merged = { ...existing, commerce: product.commerce, listing_pack: product.listing_pack };
+            await db('products').where({ id: product.id }).update({
+              metadata: JSON.stringify(merged),
+              updated_at: new Date(),
+            });
+          }
+          logger.info(`discover-live: persisted commerce + listing_pack metadata for ${accepted.filter(p => p.id).length} products`);
+        } catch (metaErr: any) {
+          const msg = `metadata update failed: ${metaErr?.message || metaErr}`;
+          logger.warn(`discover-live: ${msg}`);
+          allErrors.push(msg);
+        }
       }
     }
 
