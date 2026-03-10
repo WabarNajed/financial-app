@@ -165,7 +165,31 @@ async function migrate() {
       )
     `);
 
+    // Ad campaigns table (Section 7)
+    await db.raw(`
+      CREATE TABLE IF NOT EXISTS ad_campaigns (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        product_id UUID REFERENCES products(id) ON DELETE CASCADE,
+        creative_id VARCHAR(100),
+        platform VARCHAR(50) NOT NULL DEFAULT 'tiktok',
+        budget DECIMAL(10,2) DEFAULT 50,
+        status VARCHAR(50) DEFAULT 'draft',
+        impressions INTEGER DEFAULT 0,
+        clicks INTEGER DEFAULT 0,
+        ctr DECIMAL(8,4) DEFAULT 0,
+        cpc DECIMAL(10,2) DEFAULT 0,
+        conversions INTEGER DEFAULT 0,
+        cpa DECIMAL(10,2) DEFAULT 0,
+        roas DECIMAL(10,2) DEFAULT 0,
+        scaling_stage VARCHAR(50) DEFAULT 'testing',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
     // Indexes
+    await db.raw('CREATE INDEX IF NOT EXISTS idx_ad_campaigns_product ON ad_campaigns(product_id)');
+    await db.raw('CREATE INDEX IF NOT EXISTS idx_ad_campaigns_status ON ad_campaigns(status)');
     await db.raw('CREATE INDEX IF NOT EXISTS idx_products_status ON products(status)');
     await db.raw('CREATE INDEX IF NOT EXISTS idx_products_category ON products(category)');
     await db.raw('CREATE INDEX IF NOT EXISTS idx_supplier_offers_product ON supplier_offers(product_id)');
