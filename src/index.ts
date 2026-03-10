@@ -10,6 +10,7 @@ import workflowRoutes from './api/routes/workflows';
 import marketingRoutes from './api/routes/marketing';
 import sallaRoutes from './api/routes/salla';
 import dashboardRoutes from './api/routes/dashboard';
+import exportRoutes from './api/routes/export';
 import logger from './utils/logger';
 
 const app = express();
@@ -69,6 +70,7 @@ api.use('/workflows', workflowRoutes);
 api.use('/marketing', marketingRoutes);
 api.use('/salla', sallaRoutes);
 api.use('/dashboard', dashboardRoutes);
+api.use('/export', exportRoutes);
 
 app.use(env.API_PREFIX, api);
 
