@@ -43,6 +43,8 @@ function extractItemImages(item: any): { image_url: string | null; image_urls: s
     item.imageList,
     item.productImages,
     item.image_urls,
+    // Alibaba DataHub nests small images as { string: [...] }
+    item.product_small_image_urls?.string,
   ];
 
   for (const arr of arrayFields) {
@@ -57,10 +59,15 @@ function extractItemImages(item: any): { image_url: string | null; image_urls: s
     }
   }
 
+  // Normalize: fix protocol-relative URLs (//ae01.alicdn.com/...)
+  const normalized = candidates.map((url) =>
+    url.startsWith('//') ? `https:${url}` : url,
+  );
+
   // Deduplicate preserving order
   const seen = new Set<string>();
   const deduped: string[] = [];
-  for (const url of candidates) {
+  for (const url of normalized) {
     if (!seen.has(url)) {
       seen.add(url);
       deduped.push(url);
@@ -71,6 +78,38 @@ function extractItemImages(item: any): { image_url: string | null; image_urls: s
     image_url: deduped[0] || null,
     image_urls: deduped,
   };
+}
+
+/**
+ * Extract items array from the RapidAPI response, handling multiple known structures:
+ *   - Alibaba DataHub: json.result.resultList[].item
+ *   - Flat array: json.data[]
+ *   - Nested array: json.data.items[]
+ */
+function extractItemsFromResponse(json: any): any[] {
+  // Alibaba DataHub format: result.resultList[].item
+  if (Array.isArray(json?.result?.resultList)) {
+    return json.result.resultList
+      .map((entry: any) => entry?.item || entry)
+      .filter(Boolean);
+  }
+
+  // Flat data array
+  if (Array.isArray(json?.data)) {
+    return json.data;
+  }
+
+  // Nested data.items
+  if (Array.isArray(json?.data?.items)) {
+    return json.data.items;
+  }
+
+  // Fallback: items at root
+  if (Array.isArray(json?.items)) {
+    return json.items;
+  }
+
+  return [];
 }
 
 // Log discovery mode once at module load
@@ -96,14 +135,22 @@ async function tryRapidApiSample(keyword: string): Promise<DiscoveredProduct[]> 
     if (!response.ok) return [];
 
     const json: any = await response.json();
-    const items = Array.isArray(json?.data) ? json.data.slice(0, 5) : [];
+    const items = extractItemsFromResponse(json).slice(0, 5);
+
+    logger.info(`[aliexpress] live response received: ${items.length} items, top-level keys: ${Object.keys(json || {}).join(', ')}`);
+
+    if (items.length === 0) {
+      logger.warn(`[aliexpress] live API returned 0 items for "${keyword}" — response shape: ${JSON.stringify(Object.keys(json || {}))}`);
+      return [];
+    }
 
     return items.map((item: any) => {
       const name = item.title || item.name || keyword;
-      const category = item.categoryName || 'General';
-      const price = Number(item.price || item.salePrice || 0) || 0;
-      const reviewCount = Number(item.orders || item.reviewCount || 0) || 0;
-      const rating = Number(item.rating || 0) || null;
+      const category = item.categoryName || item.category || 'General';
+      // Alibaba DataHub uses promotionPrice / salePrice; other APIs use price
+      const price = Number(item.promotionPrice || item.price || item.salePrice || 0) || 0;
+      const reviewCount = Number(item.sales || item.orders || item.reviewCount || 0) || 0;
+      const rating = Number(item.averageStarRate || item.rating || 0) || null;
 
       const trend = reviewCount > 1000 ? 86 : reviewCount > 300 ? 75 : 62;
       const virality = reviewCount > 1000 ? 72 : 58;
@@ -126,9 +173,15 @@ async function tryRapidApiSample(keyword: string): Promise<DiscoveredProduct[]> 
 
       // Extract images from all known RapidAPI response fields
       const { image_url, image_urls } = extractItemImages(item);
+
+      // Log image extraction results
+      const itemKeys = Object.keys(item || {}).filter(k => /image|img|photo|pic|thumb|gallery/i.test(k));
+      logger.info(`[discovery] image fields found in response: [${itemKeys.join(', ')}]`);
       logger.info(`[discovery] images found: ${image_urls.length} for "${name}"`);
       if (image_url) {
         logger.info(`[discovery] primary image: ${image_url}`);
+      } else {
+        logger.warn(`[discovery] no images extracted for "${name}" — item keys: ${Object.keys(item || {}).join(', ')}`);
       }
 
       return {
@@ -137,7 +190,7 @@ async function tryRapidApiSample(keyword: string): Promise<DiscoveredProduct[]> 
         name_ar: null,
         category,
         source: 'aliexpress' as const,
-        source_url: item.itemUrl || item.url || 'https://www.aliexpress.com',
+        source_url: item.itemUrl || item.productUrl || item.url || 'https://www.aliexpress.com',
         price,
         currency: item.currency || 'USD',
         rating,
@@ -162,7 +215,8 @@ async function tryRapidApiSample(keyword: string): Promise<DiscoveredProduct[]> 
         },
       } satisfies DiscoveredProduct;
     });
-  } catch {
+  } catch (err: any) {
+    logger.error(`[aliexpress] live API error for "${keyword}": ${err?.message || err}`);
     return [];
   }
 }
@@ -180,7 +234,13 @@ export async function discoverFromAliExpress(keywords: string[]): Promise<Discov
   for (const keyword of keywords) {
     const rapid = await tryRapidApiSample(keyword);
     if (rapid.length) {
+      logger.info(`[aliexpress] live discovery: ${rapid.length} products for "${keyword}"`);
       results.push(...rapid);
+      continue;
+    }
+
+    if (RAPID_KEY) {
+      logger.warn(`[aliexpress] live API returned 0 results for "${keyword}", skipping fallback`);
       continue;
     }
 

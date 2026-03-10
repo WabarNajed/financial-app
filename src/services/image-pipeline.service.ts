@@ -45,10 +45,15 @@ export function normalizeImages(raw: Record<string, any>): { primary_image_url: 
     }
   }
 
+  // Normalize: fix protocol-relative URLs (//ae01.alicdn.com/...)
+  const normalized = candidates.map((url) =>
+    url.startsWith('//') ? `https:${url}` : url,
+  );
+
   // Deduplicate preserving order
   const seen = new Set<string>();
   const deduped: string[] = [];
-  for (const url of candidates) {
+  for (const url of normalized) {
     if (!seen.has(url)) {
       seen.add(url);
       deduped.push(url);

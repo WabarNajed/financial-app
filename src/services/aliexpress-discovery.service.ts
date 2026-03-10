@@ -41,6 +41,7 @@ function extractItemImages(item: any): { image_url: string | null; image_urls: s
     item.imageList,
     item.productImages,
     item.image_urls,
+    item.product_small_image_urls?.string,
   ];
 
   for (const arr of arrayFields) {
@@ -54,9 +55,14 @@ function extractItemImages(item: any): { image_url: string | null; image_urls: s
     }
   }
 
+  // Fix protocol-relative URLs (//ae01.alicdn.com/...)
+  const normalized = candidates.map((url) =>
+    url.startsWith('//') ? `https:${url}` : url,
+  );
+
   const seen = new Set<string>();
   const deduped: string[] = [];
-  for (const url of candidates) {
+  for (const url of normalized) {
     if (!seen.has(url)) {
       seen.add(url);
       deduped.push(url);
@@ -67,6 +73,21 @@ function extractItemImages(item: any): { image_url: string | null; image_urls: s
     image_url: deduped[0] || null,
     image_urls: deduped,
   };
+}
+
+/**
+ * Extract items array from the RapidAPI response, handling multiple known structures.
+ */
+function extractItemsFromResponse(json: any): any[] {
+  if (Array.isArray(json?.result?.resultList)) {
+    return json.result.resultList
+      .map((entry: any) => entry?.item || entry)
+      .filter(Boolean);
+  }
+  if (Array.isArray(json?.data)) return json.data;
+  if (Array.isArray(json?.data?.items)) return json.data.items;
+  if (Array.isArray(json?.items)) return json.items;
+  return [];
 }
 
 /**
@@ -104,21 +125,26 @@ export class AliExpressDiscoveryEngine {
 
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const json: any = await response.json();
-    const items = Array.isArray(json?.data) ? json.data.slice(0, limit) : [];
+    const items = extractItemsFromResponse(json).slice(0, limit);
+
+    logger.info(`[aliexpress-discovery] live response received: ${items.length} items, top-level keys: ${Object.keys(json || {}).join(', ')}`);
 
     return items.map((item: any) => {
       const { image_url, image_urls } = extractItemImages(item);
       const title = item.title || item.name || keyword;
+
+      const itemKeys = Object.keys(item || {}).filter(k => /image|img|photo|pic|thumb|gallery/i.test(k));
+      logger.info(`[discovery] image fields found in response: [${itemKeys.join(', ')}]`);
       logger.info(`[discovery] images found: ${image_urls.length} for "${title}"`);
       if (image_url) {
         logger.info(`[discovery] primary image: ${image_url}`);
       }
       return {
         title,
-        price: Number(item.price || item.salePrice || 0) || 0,
+        price: Number(item.promotionPrice || item.price || item.salePrice || 0) || 0,
         currency: item.currency || 'USD',
-        orders: Number(item.orders || item.reviewCount || 0) || 0,
-        rating: Number(item.rating || 0) || 0,
+        orders: Number(item.sales || item.orders || item.reviewCount || 0) || 0,
+        rating: Number(item.averageStarRate || item.rating || 0) || 0,
         image_url,
         image_urls,
         supplier: item.storeName || item.seller || 'Unknown Supplier',
