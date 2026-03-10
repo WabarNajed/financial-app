@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { ProductRepo } from '../../database/repositories';
 import { validateExportReadiness } from '../../services/export-validation.service';
 import { buildSallaPayload } from '../../services/export-payload-builder.service';
+import { pushToSalla } from '../../services/export-push.service';
 import { CommercePackage, ListingPack } from '../../discovery/types';
 import logger from '../../utils/logger';
 
@@ -73,6 +74,45 @@ router.get('/salla/:productId', async (req: Request, res: Response) => {
   } catch (error: any) {
     logger.error(`[export] GET /export/salla/${productId} error: ${error?.message || error}`);
     res.status(500).json({ error: 'Failed to build Salla export preview' });
+  }
+});
+
+/**
+ * POST /export/salla/:productId/push
+ *
+ * Pushes an approved, export-ready product to Salla.
+ * Returns structured result with sync status.
+ */
+router.post('/salla/:productId/push', async (req: Request, res: Response) => {
+  const { productId } = req.params;
+
+  try {
+    const result = await pushToSalla(productId);
+
+    if (result.sync_status === 'not_configured') {
+      res.status(422).json(result);
+      return;
+    }
+
+    if (!result.success && result.error === 'Product not found') {
+      res.status(404).json(result);
+      return;
+    }
+
+    if (!result.success) {
+      res.status(400).json(result);
+      return;
+    }
+
+    res.json(result);
+  } catch (error: any) {
+    logger.error(`[export] POST /export/salla/${productId}/push error: ${error?.message || error}`);
+    res.status(500).json({
+      success: false,
+      product_id: productId,
+      sync_status: 'failed',
+      error: 'Internal server error during Salla push',
+    });
   }
 });
 
