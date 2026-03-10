@@ -9,13 +9,19 @@ import logger from '../utils/logger';
 export function normalizeImages(raw: Record<string, any>): { primary_image_url: string | null; image_urls: string[] } {
   const candidates: string[] = [];
 
-  // Collect from every known field pattern
+  // Collect from every known field pattern (including RapidAPI / Alibaba DataHub fields)
   const fields = [
+    raw.product_main_image_url, raw.main_image,
     raw.image_urls, raw.image_url, raw.image, raw.imageUrl,
+    raw.productImage, raw.img, raw.thumb,
     raw.thumbnail, raw.thumbnails,
+    raw.images, raw.gallery, raw.imageList, raw.productImages,
+    raw.metadata?.product_main_image_url, raw.metadata?.main_image,
+    raw.metadata?.primary_image_url,
     raw.metadata?.image, raw.metadata?.images,
     raw.metadata?.image_url, raw.metadata?.image_urls,
     raw.metadata?.thumbnail, raw.metadata?.thumbnails,
+    raw.metadata?.gallery, raw.metadata?.productImages,
   ];
 
   for (const val of fields) {

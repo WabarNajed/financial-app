@@ -13,6 +13,66 @@ import logger from '../utils/logger';
 const RAPID_HOST = process.env.RAPIDAPI_HOST || 'alibaba-datahub.p.rapidapi.com';
 const RAPID_KEY = process.env.RAPIDAPI_KEY || '';
 
+/**
+ * Extract image URLs from a RapidAPI item, checking all known field locations.
+ * Returns { image_url, image_urls } with at least the primary image.
+ */
+function extractItemImages(item: any): { image_url: string | null; image_urls: string[] } {
+  const candidates: string[] = [];
+
+  // All known field names from Alibaba DataHub / AliExpress RapidAPI responses
+  const singleFields = [
+    item.product_main_image_url,
+    item.main_image,
+    item.image,
+    item.imageUrl,
+    item.productImage,
+    item.img,
+    item.thumb,
+    item.thumbnail,
+  ];
+
+  for (const val of singleFields) {
+    if (typeof val === 'string' && val.trim()) candidates.push(val.trim());
+  }
+
+  // Array fields: images[], gallery[], imageList[], productImages[]
+  const arrayFields = [
+    item.images,
+    item.gallery,
+    item.imageList,
+    item.productImages,
+    item.image_urls,
+  ];
+
+  for (const arr of arrayFields) {
+    if (Array.isArray(arr)) {
+      for (const v of arr) {
+        if (typeof v === 'string' && v.trim()) candidates.push(v.trim());
+        // Some APIs return { url: string } objects
+        if (v && typeof v === 'object' && typeof v.url === 'string' && v.url.trim()) {
+          candidates.push(v.url.trim());
+        }
+      }
+    }
+  }
+
+  // Deduplicate preserving order
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const url of candidates) {
+    if (!seen.has(url)) {
+      seen.add(url);
+      deduped.push(url);
+    }
+  }
+
+  return {
+    image_url: deduped[0] || null,
+    image_urls: deduped,
+  };
+}
+
 // Log discovery mode once at module load
 if (RAPID_KEY) {
   logger.info('[aliexpress] Discovery mode: RapidAPI live search');
@@ -64,6 +124,13 @@ async function tryRapidApiSample(keyword: string): Promise<DiscoveredProduct[]> 
         impulse_buy_score: impulse,
       });
 
+      // Extract images from all known RapidAPI response fields
+      const { image_url, image_urls } = extractItemImages(item);
+      logger.info(`[discovery] images found: ${image_urls.length} for "${name}"`);
+      if (image_url) {
+        logger.info(`[discovery] primary image: ${image_url}`);
+      }
+
       return {
         id: makeId(`aliexpress-${name}-${keyword}`),
         name,
@@ -75,7 +142,8 @@ async function tryRapidApiSample(keyword: string): Promise<DiscoveredProduct[]> 
         currency: item.currency || 'USD',
         rating,
         review_count: reviewCount,
-        image_url: item.image || item.imageUrl || null,
+        image_url,
+        image_urls,
         keywords: [keyword],
         trend_signal: 'supplier_live',
         virality_score: virality,
@@ -90,6 +158,7 @@ async function tryRapidApiSample(keyword: string): Promise<DiscoveredProduct[]> 
         metadata: {
           platform: 'aliexpress',
           discovery_mode: 'rapidapi',
+          primary_image_url: image_url,
         },
       } satisfies DiscoveredProduct;
     });

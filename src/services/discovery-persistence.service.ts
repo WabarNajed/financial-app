@@ -57,13 +57,31 @@ export async function persistDiscoveredProducts(
         // Continue to insert path
       }
 
+      // Build image_urls array from both image_urls[] and image_url fields
+      const imageUrls: string[] = [];
+      if (Array.isArray(product.image_urls) && product.image_urls.length > 0) {
+        imageUrls.push(...product.image_urls);
+      } else if (product.image_url) {
+        imageUrls.push(product.image_url);
+      }
+      const primaryImageUrl = imageUrls[0] || null;
+
+      // Merge primary_image_url into metadata
+      const metadata = { ...(product.metadata || {}), primary_image_url: primaryImageUrl };
+
+      if (imageUrls.length > 0) {
+        logger.info(`[discovery] images found: ${imageUrls.length} for "${product.name}"`);
+        logger.info(`[discovery] primary image: ${primaryImageUrl}`);
+      }
+
       if (existing && existing.id) {
         await db('products').where({ id: existing.id }).update({
           virality_score: product.virality_score,
           impulse_buy_score: product.impulse_buy_score,
           saudi_relevance_score: product.saudi_relevance_score,
+          image_urls: JSON.stringify(imageUrls),
           keywords: JSON.stringify(product.keywords || []),
-          metadata: JSON.stringify(product.metadata || {}),
+          metadata: JSON.stringify(metadata),
           updated_at: new Date(),
         });
         productId = existing.id;
@@ -81,10 +99,10 @@ export async function persistDiscoveredProducts(
           virality_score: product.virality_score,
           impulse_buy_score: product.impulse_buy_score,
           saudi_relevance_score: product.saudi_relevance_score,
-          image_urls: JSON.stringify(product.image_url ? [product.image_url] : []),
+          image_urls: JSON.stringify(imageUrls),
           keywords: JSON.stringify(product.keywords || []),
           status: 'discovered',
-          metadata: JSON.stringify(product.metadata || {}),
+          metadata: JSON.stringify(metadata),
         }).returning('id');
         productId = row.id;
         summary.saved++;

@@ -12,6 +12,7 @@ export interface DiscoveredProduct {
   rating?: number | null;
   review_count?: number | null;
   image_url?: string | null;
+  image_urls?: string[];
   keywords: string[];
   trend_signal?: string | null;
   virality_score: number;
