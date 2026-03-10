@@ -513,7 +513,7 @@ Return ONLY valid JSON:
  * Generate a commerce package for a single product.
  * Uses OpenAI if available, otherwise deterministic fallback.
  */
-async function generateCommercePackage(product: DiscoveryProduct): Promise<CommercePackage> {
+export async function generateCommercePackage(product: DiscoveryProduct): Promise<CommercePackage> {
   if (env.OPENAI_API_KEY) {
     const aiResult = await generateOpenAICommerce(product);
     if (aiResult) return aiResult;
@@ -713,7 +713,7 @@ function buildGenericListing(product: DiscoveryProduct): ProductListingContent {
   };
 }
 
-function generateListingPack(product: DiscoveryProduct): ListingPack {
+export function generateListingPack(product: DiscoveryProduct): ListingPack {
   const content = PRODUCT_LISTING[product.name] ?? buildGenericListing(product);
   const recommendedPrice = product.commerce?.recommended_price_sar ?? 0;
   // compare_at_price: 15-25% above recommended to show a discount
