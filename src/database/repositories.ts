@@ -1,5 +1,5 @@
 import { Knex } from 'knex';
-import { getDb } from './connection';
+import { getDb, isDatabaseAvailable } from './connection';
 import {
   DiscoveredProduct,
   SupplierOffer,
@@ -15,6 +15,9 @@ import {
 } from '../types';
 
 function db(): Knex {
+  if (!isDatabaseAvailable()) {
+    throw new Error('Database is not available. Configure DB_PASSWORD/DATABASE_URL and ensure PostgreSQL is running.');
+  }
   return getDb();
 }
 
