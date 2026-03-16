@@ -12,6 +12,12 @@ import sallaRoutes from './api/routes/salla';
 import dashboardRoutes from './api/routes/dashboard';
 import exportRoutes from './api/routes/export';
 import adminRoutes from './api/routes/admin';
+import orderRoutes from './api/routes/orders';
+import integrationRoutes from './api/routes/integrations';
+import webhookRoutes from './api/routes/webhooks';
+import alertRoutes from './api/routes/alerts';
+import communicationRoutes from './api/routes/communications';
+import settingsRoutes from './api/routes/settings';
 import logger from './utils/logger';
 
 const app = express();
@@ -73,6 +79,14 @@ api.use('/salla', sallaRoutes);
 api.use('/dashboard', dashboardRoutes);
 api.use('/export', exportRoutes);
 api.use('/admin', adminRoutes);
+api.use('/orders', orderRoutes);
+api.use('/integrations', integrationRoutes);
+api.use('/alerts', alertRoutes);
+api.use('/communications', communicationRoutes);
+api.use('/settings', settingsRoutes);
+
+// Webhooks — no auth required (validated by webhook secret)
+app.use(`${env.API_PREFIX}/webhooks`, webhookRoutes);
 
 app.use(env.API_PREFIX, api);
 
