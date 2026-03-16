@@ -15,6 +15,9 @@ import { AmazonDiscoveryEngine } from '../../services/amazon-discovery.service';
 import { GoogleTrendsDiscoveryEngine } from '../../services/trends-discovery.service';
 import logger from '../../utils/logger';
 import { toNumber, normalizeCampaignRow } from '../../utils/number-safe';
+import { checkExportGuardrails, checkCampaignGuardrails } from '../../services/guardrails.service';
+import { upsertSupplierMapping, runSupplierCheck } from '../../services/supplier-monitor.service';
+import { getUnreadCount } from '../../services/alerts.service';
 
 const router = Router();
 const approvalService = new ApprovalService();
@@ -507,7 +510,63 @@ router.get('/discovery/google-trends', async (req: Request, res: Response) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// SYSTEM STATUS (Section 2)
+// SUPPLIER MAPPING ENDPOINTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+router.post('/products/:id/supplier-mapping', async (req: Request, res: Response) => {
+  try {
+    const { supplier_source, supplier_product_id, supplier_url, supplier_variant_id, supplier_last_price } = req.body;
+    if (!supplier_source) { res.status(400).json({ error: 'supplier_source required' }); return; }
+
+    const result = await upsertSupplierMapping({
+      product_id: req.params.id,
+      supplier_source,
+      supplier_product_id,
+      supplier_url,
+      supplier_variant_id,
+      supplier_last_price: supplier_last_price ? toNumber(supplier_last_price) : undefined,
+    });
+    res.json({ success: true, mapping: result });
+  } catch (error: any) {
+    logger.error(`[admin] supplier-mapping error: ${error?.message}`);
+    res.status(500).json({ error: 'Failed to save supplier mapping' });
+  }
+});
+
+router.get('/products/:id/supplier-mapping', async (req: Request, res: Response) => {
+  try {
+    const db = getDb();
+    const mappings = await db('supplier_mappings').where({ product_id: req.params.id });
+    res.json({ data: mappings });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to fetch supplier mappings' });
+  }
+});
+
+// ── Guardrails check ─────────────────────────────────────────────────────────
+router.get('/products/:id/guardrails', async (req: Request, res: Response) => {
+  try {
+    const exportCheck = await checkExportGuardrails(req.params.id);
+    const campaignCheck = await checkCampaignGuardrails(req.params.id);
+    res.json({ export: exportCheck, campaign: campaignCheck });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to check guardrails' });
+  }
+});
+
+// ── Run supplier check ───────────────────────────────────────────────────────
+router.post('/supplier-check', async (_req: Request, res: Response) => {
+  try {
+    const result = await runSupplierCheck();
+    res.json(result);
+  } catch (error: any) {
+    logger.error(`[admin] supplier-check error: ${error?.message}`);
+    res.status(500).json({ error: 'Supplier check failed' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SYSTEM STATUS (enhanced)
 // ═══════════════════════════════════════════════════════════════════════════
 
 router.get('/system-status', async (_req: Request, res: Response) => {
@@ -535,15 +594,43 @@ router.get('/system-status', async (_req: Request, res: Response) => {
       if (meta.commerce && meta.listing_pack) exportReady++;
     }
 
-    // Campaign stats
-    let campaignStats = { total: 0, testing: 0, scaled: 0, killed: 0 };
+    // Campaign stats with performance summary
+    let campaignStats: any = { total: 0, testing: 0, scaled: 0, killed: 0, avg_roas: 0, total_spend: 0 };
     try {
       const [{ count: total }] = await db('ad_campaigns').count('id as count');
       const [{ count: testing }] = await db('ad_campaigns').where({ status: 'testing' }).count('id as count');
       const [{ count: scaled }] = await db('ad_campaigns').where({ status: 'scaled' }).count('id as count');
       const [{ count: killed }] = await db('ad_campaigns').where({ status: 'killed' }).count('id as count');
-      campaignStats = { total: Number(total), testing: Number(testing), scaled: Number(scaled), killed: Number(killed) };
-    } catch { /* table may not exist yet */ }
+      const perfSummary = await db('ad_campaigns').whereIn('status', ['testing', 'scaled'])
+        .avg('roas as avg_roas').sum('budget as total_spend').first();
+      campaignStats = {
+        total: Number(total), testing: Number(testing), scaled: Number(scaled), killed: Number(killed),
+        avg_roas: toNumber(perfSummary?.avg_roas),
+        total_spend: toNumber(perfSummary?.total_spend),
+      };
+    } catch { /* table may not exist */ }
+
+    // Order stats
+    let orderStats = { total: 0, pending: 0, fulfilled: 0 };
+    try {
+      const [{ count: ordersTotal }] = await db('orders').count('id as count');
+      const [{ count: ordersPending }] = await db('orders').where({ order_status: 'pending' }).count('id as count');
+      const [{ count: ordersFulfilled }] = await db('orders').where({ order_status: 'fulfilled' }).count('id as count');
+      orderStats = { total: Number(ordersTotal), pending: Number(ordersPending), fulfilled: Number(ordersFulfilled) };
+    } catch { /* table may not exist */ }
+
+    // Alert count
+    let unreadAlerts = 0;
+    try { unreadAlerts = await getUnreadCount(); } catch { /* table may not exist */ }
+
+    // Supplier issues
+    let supplierIssues = 0;
+    try {
+      const [{ count: issues }] = await db('supplier_mappings')
+        .whereIn('supplier_last_stock_status', ['out_of_stock', 'removed'])
+        .count('id as count');
+      supplierIssues = Number(issues);
+    } catch { /* table may not exist */ }
 
     res.json({
       integrations,
@@ -555,7 +642,10 @@ router.get('/system-status', async (_req: Request, res: Response) => {
         missing_images: missingImages,
         image_coverage_pct: imageCoverage,
         export_ready: exportReady,
+        supplier_issues: supplierIssues,
         campaigns: campaignStats,
+        orders: orderStats,
+        unread_alerts: unreadAlerts,
       },
     });
   } catch (error: any) {
