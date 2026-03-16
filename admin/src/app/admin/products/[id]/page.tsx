@@ -296,8 +296,17 @@ export default function ProductEditor() {
             </div>
           </Section>
 
-          {/* Section: Salla Sync */}
-          <Section title="Salla Sync" open={false}>
+          {/* Section: Storefront Publishing */}
+          <Section title="Storefront Publishing" open={false}>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              <button className="btn btn-success btn-sm" onClick={async () => { try { await api.publishProduct(id, {}); notify('Published to storefront'); load(); } catch (e: any) { notify(e.message, 'error'); } }}>Publish to Store</button>
+              <button className="btn btn-outline btn-sm" onClick={async () => { try { await api.unpublishProduct(id); notify('Unpublished'); load(); } catch (e: any) { notify(e.message, 'error'); } }}>Unpublish</button>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text2)' }}>Publishing makes this product live on your custom storefront (PRIMARY). Salla is optional backup only.</div>
+          </Section>
+
+          {/* Section: Salla Sync (Backup) */}
+          <Section title="Salla Sync (Backup)" open={false}>
             {guardrails && !guardrails.can_push && guardrails.blockers?.length > 0 && (
               <div style={{ marginBottom: 12, padding: 8, background: 'rgba(255,0,0,0.1)', borderRadius: 6 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--red)', marginBottom: 4 }}>Push Blocked:</div>

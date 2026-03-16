@@ -711,6 +711,127 @@ router.post('/products/:id/delete-from-salla', async (req: Request, res: Respons
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// STOREFRONT MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── Store settings ──────────────────────────────────────────────────────
+router.get('/store-settings', async (_req: Request, res: Response) => {
+  try {
+    const db = getDb();
+    let settings = await db('store_settings').first();
+    if (!settings) [settings] = await db('store_settings').insert({ store_name: 'My Store' }).returning('*');
+    res.json({ settings });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/store-settings', async (req: Request, res: Response) => {
+  try {
+    const db = getDb();
+    let existing = await db('store_settings').first();
+    if (!existing) [existing] = await db('store_settings').insert({ store_name: 'My Store' }).returning('*');
+    const allowed = [
+      'store_name', 'store_name_ar', 'store_description', 'store_description_ar',
+      'logo_url', 'favicon_url', 'primary_color', 'secondary_color', 'accent_color',
+      'background_color', 'text_color', 'whatsapp_number', 'phone', 'email', 'address',
+      'city', 'country', 'currency', 'hero_title', 'hero_title_ar', 'hero_subtitle',
+      'hero_subtitle_ar', 'hero_image_url', 'hero_cta_text', 'hero_cta_text_ar',
+      'show_hero', 'show_featured', 'show_categories', 'show_new_arrivals', 'show_trust_badges',
+      'footer_text', 'footer_text_ar', 'facebook_url', 'instagram_url', 'tiktok_url', 'twitter_url',
+      'privacy_policy', 'terms_of_service', 'return_policy',
+    ];
+    const update: any = { updated_at: new Date() };
+    for (const k of allowed) { if (req.body[k] !== undefined) update[k] = req.body[k]; }
+    await db('store_settings').where('id', existing.id).update(update);
+    const updated = await db('store_settings').where('id', existing.id).first();
+    res.json({ success: true, settings: updated });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Categories ──────────────────────────────────────────────────────────
+router.get('/categories', async (_req: Request, res: Response) => {
+  try {
+    const db = getDb();
+    const categories = await db('categories').orderBy('sort_order', 'asc');
+    const counts = await db('products').whereNotNull('category_id').where('is_published', true).groupBy('category_id').select('category_id').count('* as count');
+    const countMap: Record<string, number> = {};
+    counts.forEach((c: any) => { countMap[c.category_id] = Number(c.count); });
+    res.json({ categories: categories.map((c: any) => ({ ...c, product_count: countMap[c.id] || 0 })) });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/categories', async (req: Request, res: Response) => {
+  try {
+    const db = getDb();
+    const { name, name_ar, slug, description, description_ar, image_url, parent_id, sort_order, is_active } = req.body;
+    if (!name || !slug) return res.status(400).json({ error: 'name and slug required' });
+    const existing = await db('categories').where('slug', slug).first();
+    if (existing) {
+      await db('categories').where('id', existing.id).update({ name, name_ar, description, description_ar, image_url, parent_id, sort_order, is_active });
+      const updated = await db('categories').where('id', existing.id).first();
+      return res.json({ category: updated });
+    }
+    const [cat] = await db('categories').insert({ name, name_ar, slug, description, description_ar, image_url, parent_id, sort_order, is_active }).returning('*');
+    res.json({ category: cat });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.delete('/categories/:id', async (req: Request, res: Response) => {
+  try {
+    const db = getDb();
+    await db('categories').where('id', req.params.id).del();
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Publish product to storefront ──────────────────────────────────────
+router.post('/products/:id/publish', async (req: Request, res: Response) => {
+  try {
+    const db = getDb();
+    const product = await db('products').where('id', req.params.id).first();
+    if (!product) return res.status(404).json({ error: 'Product not found' });
+    const {
+      storefront_price, compare_at_price, category_id, slug,
+      short_description, short_description_ar, full_description, full_description_ar,
+      stock_quantity, fulfillment_mode, automation_enabled,
+    } = req.body;
+    const productSlug = slug || product.slug || product.name.toLowerCase().replace(/[^\w\s-]/g, '').replace(/[\s_]+/g, '-').replace(/^-+|-+$/g, '') || `product-${Date.now()}`;
+    await db('products').where('id', req.params.id).update({
+      is_published: true,
+      slug: productSlug,
+      storefront_price: storefront_price || product.storefront_price || toNumber((typeof product.metadata === 'string' ? JSON.parse(product.metadata) : (product.metadata || {}))?.commerce?.recommended_price_sar),
+      compare_at_price: compare_at_price ?? product.compare_at_price,
+      category_id: category_id ?? product.category_id,
+      short_description: short_description ?? product.short_description,
+      short_description_ar: short_description_ar ?? product.short_description_ar,
+      full_description: full_description ?? product.full_description,
+      full_description_ar: full_description_ar ?? product.full_description_ar,
+      stock_quantity: stock_quantity ?? product.stock_quantity ?? 100,
+      fulfillment_mode: fulfillment_mode ?? product.fulfillment_mode ?? 'manual',
+      automation_enabled: automation_enabled ?? product.automation_enabled ?? false,
+      updated_at: new Date(),
+    });
+    res.json({ success: true });
+  } catch (err: any) { logger.error(`publish error: ${err.message}`); res.status(500).json({ error: err.message }); }
+});
+
+router.post('/products/:id/unpublish', async (req: Request, res: Response) => {
+  try {
+    const db = getDb();
+    await db('products').where('id', req.params.id).update({ is_published: false, updated_at: new Date() });
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Customers ─────────────────────────────────────────────────────────
+router.get('/customers', async (req: Request, res: Response) => {
+  try {
+    const db = getDb();
+    const customers = await db('customers').orderBy('created_at', 'desc').limit(100);
+    res.json({ customers });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // SYSTEM STATUS (enhanced)
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -731,6 +852,13 @@ router.get('/system-status', async (_req: Request, res: Response) => {
       if (Array.isArray(imgs) && imgs.length > 0) { withImages++; } else { missingImages++; }
     }
     const imageCoverage = allProducts.length > 0 ? Math.round((withImages / allProducts.length) * 100) : 0;
+
+    // Published count (storefront)
+    let publishedCount = 0;
+    try {
+      const [{ count: pubCount }] = await db('products').where({ is_published: true }).count('id as count');
+      publishedCount = Number(pubCount);
+    } catch { /* column may not exist */ }
 
     // Export readiness count
     let exportReady = 0;
@@ -842,6 +970,7 @@ router.get('/system-status', async (_req: Request, res: Response) => {
         missing_images: missingImages,
         image_coverage_pct: imageCoverage,
         export_ready: exportReady,
+        published_count: publishedCount,
         supplier_issues: supplierIssues,
         campaigns: campaignStats,
         orders: orderStats,

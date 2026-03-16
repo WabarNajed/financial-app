@@ -391,6 +391,110 @@ async function migrate() {
       )
     `);
 
+    // ── Customers table ────────────────────────────────────────────────────
+    await db.raw(`
+      CREATE TABLE IF NOT EXISTS customers (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        email VARCHAR(300) UNIQUE,
+        phone VARCHAR(100),
+        name VARCHAR(300),
+        password_hash TEXT,
+        city VARCHAR(200),
+        country VARCHAR(100) DEFAULT 'SA',
+        address TEXT,
+        postal_code VARCHAR(50),
+        is_verified BOOLEAN DEFAULT false,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    // ── Categories table ─────────────────────────────────────────────────
+    await db.raw(`
+      CREATE TABLE IF NOT EXISTS categories (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        name VARCHAR(300) NOT NULL,
+        name_ar VARCHAR(300),
+        slug VARCHAR(300) UNIQUE NOT NULL,
+        description TEXT,
+        description_ar TEXT,
+        image_url TEXT,
+        parent_id UUID REFERENCES categories(id) ON DELETE SET NULL,
+        sort_order INTEGER DEFAULT 0,
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    // ── Carts table ──────────────────────────────────────────────────────
+    await db.raw(`
+      CREATE TABLE IF NOT EXISTS carts (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        customer_id UUID REFERENCES customers(id) ON DELETE CASCADE,
+        session_id VARCHAR(200),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    await db.raw(`
+      CREATE TABLE IF NOT EXISTS cart_items (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        cart_id UUID REFERENCES carts(id) ON DELETE CASCADE,
+        product_id UUID REFERENCES products(id) ON DELETE CASCADE,
+        quantity INTEGER DEFAULT 1,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    // ── Store settings table ─────────────────────────────────────────────
+    await db.raw(`
+      CREATE TABLE IF NOT EXISTS store_settings (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        store_name VARCHAR(300) DEFAULT 'My Store',
+        store_name_ar VARCHAR(300),
+        store_description TEXT,
+        store_description_ar TEXT,
+        logo_url TEXT,
+        favicon_url TEXT,
+        primary_color VARCHAR(20) DEFAULT '#6366f1',
+        secondary_color VARCHAR(20) DEFAULT '#818cf8',
+        accent_color VARCHAR(20) DEFAULT '#22c55e',
+        background_color VARCHAR(20) DEFAULT '#ffffff',
+        text_color VARCHAR(20) DEFAULT '#1a1a2e',
+        whatsapp_number VARCHAR(50),
+        phone VARCHAR(50),
+        email VARCHAR(300),
+        address TEXT,
+        city VARCHAR(200),
+        country VARCHAR(100) DEFAULT 'Saudi Arabia',
+        currency VARCHAR(10) DEFAULT 'SAR',
+        hero_title TEXT,
+        hero_title_ar TEXT,
+        hero_subtitle TEXT,
+        hero_subtitle_ar TEXT,
+        hero_image_url TEXT,
+        hero_cta_text VARCHAR(200) DEFAULT 'Shop Now',
+        hero_cta_text_ar VARCHAR(200),
+        show_hero BOOLEAN DEFAULT true,
+        show_featured BOOLEAN DEFAULT true,
+        show_categories BOOLEAN DEFAULT true,
+        show_new_arrivals BOOLEAN DEFAULT true,
+        show_trust_badges BOOLEAN DEFAULT true,
+        footer_text TEXT,
+        footer_text_ar TEXT,
+        facebook_url TEXT,
+        instagram_url TEXT,
+        tiktok_url TEXT,
+        twitter_url TEXT,
+        privacy_policy TEXT,
+        terms_of_service TEXT,
+        return_policy TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
     // ── Safe ALTER TABLE additions (idempotent) ──────────────────────────────
     // Add image_status to products
     await db.raw(`DO $$ BEGIN
@@ -431,8 +535,44 @@ async function migrate() {
       ALTER TABLE email_accounts ADD COLUMN IF NOT EXISTS last_test_message TEXT;
     EXCEPTION WHEN OTHERS THEN NULL; END $$`);
 
+    // Add storefront fields to products
+    await db.raw(`DO $$ BEGIN
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS slug VARCHAR(500);
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS category_id UUID REFERENCES categories(id) ON DELETE SET NULL;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS is_published BOOLEAN DEFAULT false;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS storefront_price DECIMAL(10,2);
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS compare_at_price DECIMAL(10,2);
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS short_description TEXT;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS short_description_ar TEXT;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS full_description TEXT;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS full_description_ar TEXT;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_quantity INTEGER DEFAULT 0;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS fulfillment_mode VARCHAR(20) DEFAULT 'manual';
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS automation_enabled BOOLEAN DEFAULT false;
+    EXCEPTION WHEN OTHERS THEN NULL; END $$`);
+
+    // Add customer_id to orders
+    await db.raw(`DO $$ BEGIN
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_id UUID REFERENCES customers(id) ON DELETE SET NULL;
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) DEFAULT 'whatsapp';
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS internal_notes TEXT;
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_notes TEXT;
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_address TEXT;
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS source VARCHAR(50) DEFAULT 'storefront';
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS total_amount DECIMAL(12,2) DEFAULT 0;
+    EXCEPTION WHEN OTHERS THEN NULL; END $$`);
+
     // Indexes
     await db.raw('CREATE INDEX IF NOT EXISTS idx_ad_campaigns_product ON ad_campaigns(product_id)');
+    await db.raw('CREATE INDEX IF NOT EXISTS idx_customers_email ON customers(email)');
+    await db.raw('CREATE INDEX IF NOT EXISTS idx_categories_slug ON categories(slug)');
+    await db.raw('CREATE INDEX IF NOT EXISTS idx_products_slug ON products(slug)');
+    await db.raw('CREATE INDEX IF NOT EXISTS idx_products_published ON products(is_published) WHERE is_published = true');
+    await db.raw('CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id)');
+    await db.raw('CREATE INDEX IF NOT EXISTS idx_carts_customer ON carts(customer_id)');
+    await db.raw('CREATE INDEX IF NOT EXISTS idx_carts_session ON carts(session_id)');
+    await db.raw('CREATE INDEX IF NOT EXISTS idx_cart_items_cart ON cart_items(cart_id)');
+    await db.raw('CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id)');
     await db.raw('CREATE INDEX IF NOT EXISTS idx_ad_campaigns_status ON ad_campaigns(status)');
     await db.raw('CREATE INDEX IF NOT EXISTS idx_products_status ON products(status)');
     await db.raw('CREATE INDEX IF NOT EXISTS idx_products_category ON products(category)');

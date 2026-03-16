@@ -8,7 +8,7 @@ function Toast({ msg, type, onDone }: { msg: string; type: string; onDone: () =>
   return <div className={`toast toast-${type}`}>{msg}</div>;
 }
 
-const STATUSES = ['pending', 'supplier_prepared', 'fulfilled', 'shipped', 'cancelled'];
+const STATUSES = ['pending_review', 'pending_payment', 'approved', 'supplier_ordered', 'supplier_confirmed', 'fulfilled', 'shipped', 'delivered', 'cancelled'];
 
 export default function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -87,7 +87,9 @@ export default function OrderDetailPage() {
               <div><span style={{ color: 'var(--text2)', fontSize: 12 }}>Email</span><div>{order.customer_email || '—'}</div></div>
               <div><span style={{ color: 'var(--text2)', fontSize: 12 }}>Phone</span><div>{order.customer_phone || '—'}</div></div>
               <div><span style={{ color: 'var(--text2)', fontSize: 12 }}>Total</span><div style={{ fontWeight: 700, fontSize: 18 }}>{order.total_amount || 0} SAR</div></div>
-              <div><span style={{ color: 'var(--text2)', fontSize: 12 }}>Payment</span><div>{order.payment_status || '—'}</div></div>
+              <div><span style={{ color: 'var(--text2)', fontSize: 12 }}>Payment Status</span><div>{order.payment_status || '—'}</div></div>
+              <div><span style={{ color: 'var(--text2)', fontSize: 12 }}>Payment Method</span><div>{order.payment_method || '—'}</div></div>
+              <div><span style={{ color: 'var(--text2)', fontSize: 12 }}>Source</span><div style={{ fontWeight: 500 }}>{order.source === 'storefront' ? 'Custom Website' : order.source || 'salla'}</div></div>
               <div><span style={{ color: 'var(--text2)', fontSize: 12 }}>Created</span><div>{order.created_at ? new Date(order.created_at).toLocaleString() : '—'}</div></div>
             </div>
             {order.shipping_address && (
