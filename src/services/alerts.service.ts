@@ -5,10 +5,16 @@ export type AlertType =
   | 'missing_images'
   | 'supplier_removed'
   | 'supplier_out_of_stock'
+  | 'supplier_price_changed'
   | 'price_changed'
+  | 'salla_connection_error'
+  | 'email_connection_error'
   | 'order_issue'
+  | 'order_needs_manual_fulfillment'
   | 'campaign_underperforming'
-  | 'budget_limit_reached';
+  | 'campaign_budget_limit'
+  | 'budget_limit_reached'
+  | 'customer_complaint_detected';
 
 export type Severity = 'info' | 'warning' | 'critical';
 

@@ -66,6 +66,9 @@ export async function getBudgetSettings(): Promise<Record<string, number>> {
     scaling_budget: Number(raw.scaling_budget) || 200,
     max_cpa: Number(raw.max_cpa) || 30,
     min_roas: Number(raw.min_roas) || 2,
+    emergency_stop_budget: Number(raw.emergency_stop_budget) || 0,
+    max_daily_burn: Number(raw.max_daily_burn) || 1000,
+    max_products_testing_at_once: Number(raw.max_products_testing_at_once) || 5,
   };
 }
 
