@@ -134,6 +134,16 @@ export const api = {
   markAlertRead: (id: string) => request(`${ALERTS_BASE}/${id}/read`, { method: 'POST' }),
   resolveAlert: (id: string) => request(`${ALERTS_BASE}/${id}/resolve`, { method: 'POST' }),
 
+  // ── Store Management ────────────────────────────────────────────────────
+  getStoreSettings: () => request(`${BASE}/store-settings`),
+  saveStoreSettings: (body: any) => request(`${BASE}/store-settings`, { method: 'POST', body: JSON.stringify(body) }),
+  getCategories: () => request(`${BASE}/categories`),
+  saveCategory: (body: any) => request(`${BASE}/categories`, { method: 'POST', body: JSON.stringify(body) }),
+  deleteCategory: (id: string) => request(`${BASE}/categories/${id}`, { method: 'DELETE' }),
+  publishProduct: (id: string, body: any) => request(`${BASE}/products/${id}/publish`, { method: 'POST', body: JSON.stringify(body) }),
+  unpublishProduct: (id: string) => request(`${BASE}/products/${id}/unpublish`, { method: 'POST' }),
+  getCustomers: () => request(`${BASE}/customers`),
+
   // ── Settings ─────────────────────────────────────────────────────────────
   getSettings: (category?: string) => {
     const qs = category ? `?category=${category}` : '';

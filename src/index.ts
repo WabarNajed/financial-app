@@ -18,6 +18,7 @@ import webhookRoutes from './api/routes/webhooks';
 import alertRoutes from './api/routes/alerts';
 import communicationRoutes from './api/routes/communications';
 import settingsRoutes from './api/routes/settings';
+import storefrontRoutes from './api/routes/storefront';
 import logger from './utils/logger';
 
 const app = express();
@@ -87,6 +88,9 @@ api.use('/settings', settingsRoutes);
 
 // Webhooks — no auth required (validated by webhook secret)
 app.use(`${env.API_PREFIX}/webhooks`, webhookRoutes);
+
+// Storefront — public, no auth required
+app.use(`${env.API_PREFIX}/storefront`, storefrontRoutes);
 
 app.use(env.API_PREFIX, api);
 

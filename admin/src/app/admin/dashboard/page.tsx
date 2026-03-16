@@ -78,11 +78,29 @@ export default function DashboardPage() {
 
       {/* Row 4: Operations */}
       <h3 style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.5px' }}>Operations</h3>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, marginBottom: 20 }}>
         <Stat label="Unread Alerts" value={s.unread_alerts || 0} color={s.unread_alerts > 0 ? 'var(--red)' : 'var(--green)'} />
         <Stat label="Unread Emails" value={s.unread_emails || 0} color={s.unread_emails > 0 ? 'var(--yellow)' : 'var(--green)'} />
         <Stat label="Image Coverage" value={`${s.image_coverage_pct || 0}%`} color={s.image_coverage_pct >= 80 ? 'var(--green)' : 'var(--yellow)'} />
-        <Stat label="Pushed to Salla" value={s.pushed_to_salla || 0} color="var(--green)" />
+        <Stat label="Published (Storefront)" value={s.published_count || 0} color="var(--green)" sub="Custom website" />
+        <Stat label="Pushed to Salla" value={s.pushed_to_salla || 0} color="var(--text2)" sub="Backup channel" />
+      </div>
+
+      {/* Row 5: Channels */}
+      <h3 style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.5px' }}>Sales Channels</h3>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
+        <div className="card" style={{ borderLeft: '3px solid var(--green)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div><div style={{ fontWeight: 700, fontSize: 16 }}>Custom Storefront</div><div style={{ fontSize: 12, color: 'var(--text2)' }}>PRIMARY — Your own website (port 3002)</div></div>
+            <span style={{ color: 'var(--green)', fontWeight: 700, fontSize: 13 }}>● PRIMARY</span>
+          </div>
+        </div>
+        <div className="card" style={{ borderLeft: '3px solid var(--text2)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div><div style={{ fontWeight: 700, fontSize: 16 }}>Salla Store</div><div style={{ fontSize: 12, color: 'var(--text2)' }}>OPTIONAL BACKUP — {data?.salla?.active ? 'Connected' : 'Not active'}</div></div>
+            <span style={{ color: 'var(--text2)', fontWeight: 700, fontSize: 13 }}>FALLBACK</span>
+          </div>
+        </div>
       </div>
 
       {/* Integration Status */}
