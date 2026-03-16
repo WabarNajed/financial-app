@@ -47,6 +47,12 @@ export default function ProductEditor() {
   const [commerce, setCommerce] = useState<any>({});
   const [listingPack, setListingPack] = useState<any>({});
   const [status, setStatus] = useState('');
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [imageStatus, setImageStatus] = useState('');
+  const [newImageUrl, setNewImageUrl] = useState('');
+  const [supplier, setSupplier] = useState<any>(null);
+  const [supplierForm, setSupplierForm] = useState<any>({});
+  const [guardrails, setGuardrails] = useState<any>(null);
 
   const notify = (msg: string, type = 'success') => setToast({ msg, type });
 
@@ -76,6 +82,12 @@ export default function ProductEditor() {
       setCommerce(d.commerce || {});
       setListingPack(d.listing_pack || {});
       setStatus(d.status || 'discovered');
+      setWarnings(d.warnings || []);
+      setImageStatus(d.image_status || '');
+      // Load supplier mapping
+      api.getSupplierMapping(id).then((r) => { const m = r.mapping || r.data || r; setSupplier(m); setSupplierForm(m || {}); }).catch(() => {});
+      // Load guardrails
+      api.getGuardrails(id).then((r) => setGuardrails(r)).catch(() => {});
     } catch (e: any) { notify(e.message, 'error'); }
     setLoading(false);
   }, [id]);
@@ -231,6 +243,79 @@ export default function ProductEditor() {
               <label>Tags (comma-separated)</label>
               <input dir="rtl" value={(listingPack.tags || []).join(', ')} onChange={(e) => updateLP('tags', e.target.value.split(',').map((s: string) => s.trim()).filter(Boolean))} />
             </div>
+          </Section>
+
+          {/* Section: Image Manager */}
+          <Section title="Image Manager">
+            {warnings.length > 0 && (
+              <div style={{ marginBottom: 12, padding: 8, background: 'rgba(255,0,0,0.1)', borderRadius: 6 }}>
+                {warnings.map((w, i) => <div key={i} style={{ color: 'var(--red)', fontSize: 12, marginBottom: 2 }}>⚠ {w}</div>)}
+              </div>
+            )}
+            {imageStatus && <div style={{ fontSize: 12, marginBottom: 8, color: imageStatus === 'complete' ? 'var(--green)' : 'var(--yellow)' }}>Image status: {imageStatus}</div>}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+              {(core.image_urls || []).map((url: string, idx: number) => (
+                <div key={idx} style={{ position: 'relative', border: idx === 0 ? '2px solid var(--green)' : '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', width: 100, height: 100 }}>
+                  <img src={url} alt={`img-${idx}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                  {idx === 0 && <div style={{ position: 'absolute', top: 2, left: 2, fontSize: 9, background: 'var(--green)', color: 'white', padding: '1px 4px', borderRadius: 3 }}>Primary</div>}
+                  <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, display: 'flex', justifyContent: 'center', gap: 2, background: 'rgba(0,0,0,0.6)', padding: 2 }}>
+                    {idx > 0 && <button className="btn btn-sm" style={{ fontSize: 9, padding: '1px 4px' }} onClick={async () => { try { await api.setPrimaryImage(id, url); notify('Primary set'); load(); } catch (e: any) { notify(e.message, 'error'); } }}>★</button>}
+                    <button className="btn btn-sm" style={{ fontSize: 9, padding: '1px 4px', color: 'var(--red)' }} onClick={async () => { try { await api.removeImage(id, url); notify('Image removed'); load(); } catch (e: any) { notify(e.message, 'error'); } }}>✕</button>
+                  </div>
+                </div>
+              ))}
+              {(core.image_urls || []).length === 0 && <div style={{ color: 'var(--text2)', fontSize: 13 }}>No images</div>}
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+              <div className="field" style={{ flex: 1, marginBottom: 0 }}><label>Add Image URL</label><input value={newImageUrl} onChange={(e) => setNewImageUrl(e.target.value)} placeholder="https://..." /></div>
+              <button className="btn btn-primary btn-sm" onClick={async () => { if (!newImageUrl) return; try { await api.addImages(id, [newImageUrl]); notify('Image added'); setNewImageUrl(''); load(); } catch (e: any) { notify(e.message, 'error'); } }}>Add</button>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <button className="btn btn-outline btn-sm" onClick={async () => { try { await api.rebuildImages(id); notify('Images rebuilt'); load(); } catch (e: any) { notify(e.message, 'error'); } }}>Rebuild Images</button>
+              <button className="btn btn-outline btn-sm" onClick={async () => { try { await api.syncImageStatuses(); notify('Image statuses synced'); load(); } catch (e: any) { notify(e.message, 'error'); } }}>Sync All Statuses</button>
+            </div>
+          </Section>
+
+          {/* Section: Supplier Mapping */}
+          <Section title="Supplier Mapping" open={false}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="field"><label>Supplier Platform</label><input value={supplierForm.supplier_platform || ''} onChange={(e) => setSupplierForm({ ...supplierForm, supplier_platform: e.target.value })} placeholder="aliexpress, alibaba..." /></div>
+              <div className="field"><label>Supplier Item ID</label><input value={supplierForm.supplier_item_id || ''} onChange={(e) => setSupplierForm({ ...supplierForm, supplier_item_id: e.target.value })} /></div>
+              <div className="field"><label>Supplier URL</label><input value={supplierForm.supplier_url || ''} onChange={(e) => setSupplierForm({ ...supplierForm, supplier_url: e.target.value })} /></div>
+              <div className="field"><label>Supplier Price (USD)</label><input type="number" value={supplierForm.supplier_price_usd || ''} onChange={(e) => setSupplierForm({ ...supplierForm, supplier_price_usd: Number(e.target.value) })} /></div>
+              <div className="field"><label>Contact Name</label><input value={supplierForm.supplier_contact_name || ''} onChange={(e) => setSupplierForm({ ...supplierForm, supplier_contact_name: e.target.value })} /></div>
+              <div className="field"><label>Contact Email</label><input value={supplierForm.supplier_contact_email || ''} onChange={(e) => setSupplierForm({ ...supplierForm, supplier_contact_email: e.target.value })} /></div>
+              <div className="field"><label>Contact Phone</label><input value={supplierForm.supplier_contact_phone || ''} onChange={(e) => setSupplierForm({ ...supplierForm, supplier_contact_phone: e.target.value })} /></div>
+              <div className="field"><label>WhatsApp</label><input value={supplierForm.supplier_contact_whatsapp || ''} onChange={(e) => setSupplierForm({ ...supplierForm, supplier_contact_whatsapp: e.target.value })} /></div>
+            </div>
+            {supplier?.stock_status && <div style={{ fontSize: 12, marginTop: 8, color: supplier.stock_status === 'in_stock' ? 'var(--green)' : 'var(--red)' }}>Stock: {supplier.stock_status} {supplier.last_checked && `(checked ${new Date(supplier.last_checked).toLocaleDateString()})`}</div>}
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <button className="btn btn-primary btn-sm" onClick={async () => { try { await api.saveSupplierMapping(id, supplierForm); notify('Supplier mapping saved'); load(); } catch (e: any) { notify(e.message, 'error'); } }}>Save Mapping</button>
+              <button className="btn btn-outline btn-sm" onClick={async () => { try { await api.runSupplierCheck(); notify('Supplier check started'); } catch (e: any) { notify(e.message, 'error'); } }}>Run Supplier Check</button>
+              {supplierForm.supplier_url && <a href={supplierForm.supplier_url} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-sm">Open Supplier Page</a>}
+            </div>
+          </Section>
+
+          {/* Section: Salla Sync */}
+          <Section title="Salla Sync" open={false}>
+            {guardrails && !guardrails.can_push && guardrails.blockers?.length > 0 && (
+              <div style={{ marginBottom: 12, padding: 8, background: 'rgba(255,0,0,0.1)', borderRadius: 6 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--red)', marginBottom: 4 }}>Push Blocked:</div>
+                {guardrails.blockers.map((b: string, i: number) => <div key={i} style={{ color: 'var(--red)', fontSize: 12 }}>• {b}</div>)}
+              </div>
+            )}
+            {status === 'pushed_to_salla' && <div style={{ fontSize: 12, color: 'var(--green)', marginBottom: 8 }}>This product has been pushed to Salla.</div>}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="btn btn-primary btn-sm" disabled={guardrails && !guardrails.can_push} onClick={async () => { try { await api.pushToSalla(id); notify('Pushed to Salla'); load(); } catch (e: any) { notify(e.message, 'error'); } }}>Push to Salla</button>
+              <button className="btn btn-outline btn-sm" onClick={async () => { try { await api.pushToSalla(id, true); notify('Force pushed to Salla'); load(); } catch (e: any) { notify(e.message, 'error'); } }}>Force Push</button>
+              <button className="btn btn-outline btn-sm" onClick={async () => { try { await api.disableInSalla(id); notify('Disabled in Salla'); load(); } catch (e: any) { notify(e.message, 'error'); } }}>Disable in Salla</button>
+              <button className="btn btn-danger btn-sm" onClick={async () => { if (confirm('Delete from Salla?')) { try { await api.deleteFromSalla(id); notify('Deleted from Salla'); load(); } catch (e: any) { notify(e.message, 'error'); } } }}>Delete from Salla</button>
+            </div>
+            {guardrails && guardrails.warnings?.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                {guardrails.warnings.map((w: string, i: number) => <div key={i} style={{ color: 'var(--yellow)', fontSize: 12 }}>⚠ {w}</div>)}
+              </div>
+            )}
           </Section>
 
           {/* Section E: Export & Approval */}
