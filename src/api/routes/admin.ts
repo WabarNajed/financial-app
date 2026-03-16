@@ -18,6 +18,11 @@ import { toNumber, normalizeCampaignRow } from '../../utils/number-safe';
 import { checkExportGuardrails, checkCampaignGuardrails } from '../../services/guardrails.service';
 import { upsertSupplierMapping, runSupplierCheck } from '../../services/supplier-monitor.service';
 import { getUnreadCount } from '../../services/alerts.service';
+import {
+  addProductImages, removeProductImage, setPrimaryImage,
+  reorderProductImages, syncImageStatuses,
+} from '../../services/image-management.service';
+import { createProductInSalla, disableProductInSalla } from '../../services/salla-sync.service';
 
 const router = Router();
 const approvalService = new ApprovalService();
@@ -76,11 +81,13 @@ router.get('/products', async (req: Request, res: Response) => {
     const products = rows.map((r: any) => {
       const meta = typeof r.metadata === 'string' ? JSON.parse(r.metadata) : (r.metadata || {});
       const imageUrls = typeof r.image_urls === 'string' ? JSON.parse(r.image_urls) : (r.image_urls || []);
+      const hasImages = Array.isArray(imageUrls) && imageUrls.length > 0;
       return {
         ...r,
         metadata: meta,
         image_urls: imageUrls,
-        primary_image_url: meta.primary_image_url || (Array.isArray(imageUrls) ? imageUrls[0] : null) || null,
+        primary_image_url: r.primary_image_url || meta.primary_image_url || (hasImages ? imageUrls[0] : null) || null,
+        image_status: r.image_status || (hasImages ? 'available' : 'missing'),
         has_commerce: !!meta.commerce,
         has_listing_pack: !!meta.listing_pack,
         has_creatives: !!meta.ad_creatives,
@@ -132,17 +139,38 @@ router.get('/products/:id', async (req: Request, res: Response) => {
       campaigns = rawCampaigns.map(normalizeCampaignRow);
     } catch { /* table may not exist yet */ }
 
+    // Supplier mapping
+    let supplierMappings: any[] = [];
+    try {
+      supplierMappings = await db('supplier_mappings').where({ product_id: req.params.id });
+    } catch { /* table may not exist yet */ }
+
+    // Image status
+    const imageStatus = product.image_status || (imageUrls.length > 0 ? 'available' : 'missing');
+    const primaryImageUrl = product.primary_image_url || meta.primary_image_url || (Array.isArray(imageUrls) ? imageUrls[0] : null) || null;
+
+    // Guardrail warnings
+    const warnings: string[] = [];
+    if (imageUrls.length === 0) warnings.push('This product is missing images and needs action.');
+    if (supplierMappings.length === 0) warnings.push('No supplier mapping configured.');
+    const activeMapping = supplierMappings.find((m: any) => m.is_active);
+    if (activeMapping?.supplier_last_stock_status === 'out_of_stock') warnings.push('Supplier product is out of stock.');
+    if (activeMapping?.supplier_last_stock_status === 'removed') warnings.push('Supplier product has been removed.');
+
     res.json({
       data: {
         ...product,
         metadata: meta,
         image_urls: imageUrls,
-        primary_image_url: meta.primary_image_url || (Array.isArray(imageUrls) ? imageUrls[0] : null) || null,
+        primary_image_url: primaryImageUrl,
+        image_status: imageStatus,
         score: score || null,
         commerce: meta.commerce || null,
         listing_pack: meta.listing_pack || null,
         ad_creatives: meta.ad_creatives || null,
         campaigns,
+        supplier_mappings: supplierMappings,
+        warnings,
       },
     });
   } catch (error: any) {
@@ -515,7 +543,10 @@ router.get('/discovery/google-trends', async (req: Request, res: Response) => {
 
 router.post('/products/:id/supplier-mapping', async (req: Request, res: Response) => {
   try {
-    const { supplier_source, supplier_product_id, supplier_url, supplier_variant_id, supplier_last_price } = req.body;
+    const {
+      supplier_source, supplier_product_id, supplier_url, supplier_variant_id, supplier_last_price,
+      supplier_contact_name, supplier_contact_email, supplier_contact_phone, supplier_contact_whatsapp,
+    } = req.body;
     if (!supplier_source) { res.status(400).json({ error: 'supplier_source required' }); return; }
 
     const result = await upsertSupplierMapping({
@@ -525,6 +556,10 @@ router.post('/products/:id/supplier-mapping', async (req: Request, res: Response
       supplier_url,
       supplier_variant_id,
       supplier_last_price: supplier_last_price ? toNumber(supplier_last_price) : undefined,
+      supplier_contact_name,
+      supplier_contact_email,
+      supplier_contact_phone,
+      supplier_contact_whatsapp,
     });
     res.json({ success: true, mapping: result });
   } catch (error: any) {
@@ -562,6 +597,116 @@ router.post('/supplier-check', async (_req: Request, res: Response) => {
   } catch (error: any) {
     logger.error(`[admin] supplier-check error: ${error?.message}`);
     res.status(500).json({ error: 'Supplier check failed' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// IMAGE MANAGEMENT ENDPOINTS (Section 2)
+// ═══════════════════════════════════════════════════════════════════════════
+
+router.post('/products/:id/images/add', async (req: Request, res: Response) => {
+  try {
+    const { urls } = req.body;
+    if (!urls || !Array.isArray(urls)) { res.status(400).json({ error: 'urls array required' }); return; }
+    const result = await addProductImages(req.params.id, urls);
+    if (!result.success) { res.status(404).json(result); return; }
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to add images' });
+  }
+});
+
+router.post('/products/:id/images/remove', async (req: Request, res: Response) => {
+  try {
+    const { url } = req.body;
+    if (!url) { res.status(400).json({ error: 'url required' }); return; }
+    const result = await removeProductImage(req.params.id, url);
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to remove image' });
+  }
+});
+
+router.post('/products/:id/images/set-primary', async (req: Request, res: Response) => {
+  try {
+    const { url } = req.body;
+    if (!url) { res.status(400).json({ error: 'url required' }); return; }
+    const result = await setPrimaryImage(req.params.id, url);
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to set primary image' });
+  }
+});
+
+router.post('/products/:id/images/reorder', async (req: Request, res: Response) => {
+  try {
+    const { urls } = req.body;
+    if (!urls || !Array.isArray(urls)) { res.status(400).json({ error: 'urls array required' }); return; }
+    const result = await reorderProductImages(req.params.id, urls);
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to reorder images' });
+  }
+});
+
+router.post('/products/sync-image-statuses', async (_req: Request, res: Response) => {
+  try {
+    const result = await syncImageStatuses();
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to sync image statuses' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SALLA SYNC ENDPOINTS (Section 5)
+// ═══════════════════════════════════════════════════════════════════════════
+
+router.post('/products/:id/push-to-salla', async (req: Request, res: Response) => {
+  try {
+    // Check guardrails first
+    const guardrails = await checkExportGuardrails(req.params.id);
+    if (!guardrails.passed && !req.body.force) {
+      res.status(400).json({
+        success: false,
+        error: 'Product blocked by guardrails',
+        blockers: guardrails.blockers,
+        hint: 'Send force: true to override',
+      });
+      return;
+    }
+    const result = await createProductInSalla(req.params.id);
+    res.json(result);
+  } catch (error: any) {
+    logger.error(`[admin] push-to-salla error: ${error?.message}`);
+    res.status(500).json({ success: false, error: 'Push to Salla failed' });
+  }
+});
+
+router.post('/products/:id/disable-in-salla', async (req: Request, res: Response) => {
+  try {
+    const result = await disableProductInSalla(req.params.id);
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: 'Disable in Salla failed' });
+  }
+});
+
+router.post('/products/:id/delete-from-salla', async (req: Request, res: Response) => {
+  try {
+    // Delete = disable + clear mapping
+    const result = await disableProductInSalla(req.params.id);
+    if (result.success) {
+      const db = getDb();
+      await db('products').where({ id: req.params.id }).update({
+        salla_product_id: null,
+        status: 'approved',
+        updated_at: new Date(),
+      });
+    }
+    res.json({ ...result, salla_product_id: null });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: 'Delete from Salla failed' });
   }
 });
 
@@ -632,8 +777,63 @@ router.get('/system-status', async (_req: Request, res: Response) => {
       supplierIssues = Number(issues);
     } catch { /* table may not exist */ }
 
+    // Salla integration status
+    let sallaStatus = { configured: false, active: false, last_test: null as string | null };
+    try {
+      const sallaConfig = await db('integrations_salla').first();
+      if (sallaConfig) {
+        sallaStatus = {
+          configured: true,
+          active: sallaConfig.is_active,
+          last_test: sallaConfig.last_test_status || null,
+        };
+      }
+    } catch { /* table may not exist */ }
+
+    // Email integration status
+    let emailStatus = { configured: false, active: false };
+    try {
+      const emailAccount = await db('email_accounts').first();
+      if (emailAccount) {
+        emailStatus = { configured: true, active: emailAccount.is_active };
+      }
+    } catch { /* table may not exist */ }
+
+    // Ad platform statuses
+    let adPlatforms: any[] = [];
+    try {
+      adPlatforms = await db('ad_platform_credentials')
+        .select('platform', 'is_active', 'mode', 'updated_at');
+    } catch { /* table may not exist */ }
+
+    // Unread emails count
+    let unreadEmails = 0;
+    try {
+      const [{ count: emailCount }] = await db('email_messages')
+        .where({ direction: 'inbound', is_read: false })
+        .count('id as count');
+      unreadEmails = Number(emailCount);
+    } catch { /* table may not exist */ }
+
+    // Revenue summary
+    let revenueSummary = { total_revenue: 0, total_ad_spend: 0, overall_roas: 0 };
+    try {
+      const orderRev = await db('orders').sum('order_total as total').first();
+      const adSpend = await db('ad_campaigns').whereIn('status', ['testing', 'scaled']).sum('spend as total').first();
+      const rev = toNumber(orderRev?.total);
+      const spend = toNumber(adSpend?.total);
+      revenueSummary = {
+        total_revenue: rev,
+        total_ad_spend: spend,
+        overall_roas: spend > 0 ? Math.round((rev / spend) * 100) / 100 : 0,
+      };
+    } catch { /* table may not exist */ }
+
     res.json({
       integrations,
+      salla: sallaStatus,
+      email: emailStatus,
+      ad_platforms: adPlatforms,
       stats: {
         total_products: Number(productCount),
         approved: Number(approvedCount),
@@ -646,6 +846,8 @@ router.get('/system-status', async (_req: Request, res: Response) => {
         campaigns: campaignStats,
         orders: orderStats,
         unread_alerts: unreadAlerts,
+        unread_emails: unreadEmails,
+        revenue: revenueSummary,
       },
     });
   } catch (error: any) {

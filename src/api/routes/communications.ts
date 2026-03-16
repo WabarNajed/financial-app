@@ -1,10 +1,11 @@
 import { Router, Request, Response } from 'express';
 import { getDb } from '../../database/connection';
+import { sendEmail, sendTemplatedEmail, listEmailMessages, fillTemplate, seedDefaultTemplates } from '../../services/email.service';
 import logger from '../../utils/logger';
 
 const router = Router();
 
-// ── List communications ──────────────────────────────────────────────────────
+// ── List communications (unified view) ──────────────────────────────────────
 router.get('/', async (req: Request, res: Response) => {
   try {
     const db = getDb();
@@ -23,6 +24,53 @@ router.get('/', async (req: Request, res: Response) => {
   } catch (error: any) {
     logger.error(`[comms] GET / error: ${error?.message}`);
     res.status(500).json({ error: 'Failed to fetch communications' });
+  }
+});
+
+// ── Email messages (detailed email view) ────────────────────────────────────
+router.get('/emails', async (req: Request, res: Response) => {
+  try {
+    const { direction, order_id, limit = '50', offset = '0' } = req.query;
+    const result = await listEmailMessages({
+      direction: direction ? String(direction) : undefined,
+      order_id: order_id ? String(order_id) : undefined,
+      limit: Number(limit),
+      offset: Number(offset),
+    });
+    res.json(result);
+  } catch (error: any) {
+    logger.error(`[comms] GET /emails error: ${error?.message}`);
+    res.status(500).json({ error: 'Failed to fetch emails' });
+  }
+});
+
+// ── Send email ──────────────────────────────────────────────────────────────
+router.post('/send-email', async (req: Request, res: Response) => {
+  try {
+    const { to, subject, body, order_id, template_name, template_data } = req.body;
+
+    if (template_name) {
+      // Templated email
+      const result = await sendTemplatedEmail({
+        template_name,
+        to,
+        data: template_data || {},
+        order_id,
+      });
+      res.json(result);
+      return;
+    }
+
+    if (!to || !subject || !body) {
+      res.status(400).json({ error: 'to, subject, and body required (or template_name + to)' });
+      return;
+    }
+
+    const result = await sendEmail({ to, subject, body, order_id });
+    res.json(result);
+  } catch (error: any) {
+    logger.error(`[comms] POST /send-email error: ${error?.message}`);
+    res.status(500).json({ success: false, error: 'Failed to send email' });
   }
 });
 
@@ -97,6 +145,53 @@ router.post('/templates', async (req: Request, res: Response) => {
     }
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to save template' });
+  }
+});
+
+// ── Preview template with data ───────────────────────────────────────────────
+router.post('/templates/preview', async (req: Request, res: Response) => {
+  try {
+    const db = getDb();
+    const { template_name, data } = req.body;
+    if (!template_name) { res.status(400).json({ error: 'template_name required' }); return; }
+
+    const template = await db('email_templates').where({ template_name }).first();
+    if (!template) { res.status(404).json({ error: 'Template not found' }); return; }
+
+    const subject = fillTemplate(template.subject || '', data || {});
+    const body_en = fillTemplate(template.body_en || '', data || {});
+    const body_ar = fillTemplate(template.body_ar || '', data || {});
+
+    res.json({ subject, body_en, body_ar });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to preview template' });
+  }
+});
+
+// ── Test send template ───────────────────────────────────────────────────────
+router.post('/templates/test-send', async (req: Request, res: Response) => {
+  try {
+    const { template_name, to, data } = req.body;
+    if (!template_name || !to) { res.status(400).json({ error: 'template_name and to required' }); return; }
+
+    const result = await sendTemplatedEmail({
+      template_name,
+      to,
+      data: data || {},
+    });
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: 'Test send failed' });
+  }
+});
+
+// ── Seed default templates ───────────────────────────────────────────────────
+router.post('/templates/seed', async (_req: Request, res: Response) => {
+  try {
+    const count = await seedDefaultTemplates();
+    res.json({ success: true, seeded: count });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to seed templates' });
   }
 });
 

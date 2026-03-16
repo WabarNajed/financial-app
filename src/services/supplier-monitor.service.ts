@@ -98,6 +98,10 @@ export async function upsertSupplierMapping(data: {
   supplier_url?: string;
   supplier_variant_id?: string;
   supplier_last_price?: number;
+  supplier_contact_name?: string;
+  supplier_contact_email?: string;
+  supplier_contact_phone?: string;
+  supplier_contact_whatsapp?: string;
 }): Promise<any> {
   const db = getDb();
   const existing = await db('supplier_mappings')

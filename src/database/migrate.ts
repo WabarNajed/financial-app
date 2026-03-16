@@ -201,6 +201,8 @@ async function migrate() {
         webhook_secret TEXT,
         store_url VARCHAR(500),
         is_active BOOLEAN DEFAULT false,
+        last_test_status VARCHAR(50),
+        last_test_message TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
@@ -221,6 +223,7 @@ async function migrate() {
         order_total DECIMAL(12,2) DEFAULT 0,
         currency VARCHAR(10) DEFAULT 'SAR',
         order_status VARCHAR(50) DEFAULT 'pending',
+        payment_status VARCHAR(50) DEFAULT 'pending',
         notes TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -239,7 +242,10 @@ async function migrate() {
         supplier_source VARCHAR(100),
         supplier_product_id VARCHAR(200),
         supplier_url TEXT,
-        created_at TIMESTAMPTZ DEFAULT NOW()
+        supplier_variant_id VARCHAR(300),
+        fulfillment_status VARCHAR(50) DEFAULT 'pending',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
 
@@ -265,12 +271,15 @@ async function migrate() {
       CREATE TABLE IF NOT EXISTS email_accounts (
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
         email_address VARCHAR(300) NOT NULL,
+        display_name VARCHAR(300),
         smtp_host VARCHAR(300),
         smtp_port INTEGER DEFAULT 587,
         imap_host VARCHAR(300),
         imap_port INTEGER DEFAULT 993,
         email_password_encrypted TEXT,
         is_active BOOLEAN DEFAULT false,
+        last_test_status VARCHAR(50),
+        last_test_message TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
@@ -333,11 +342,94 @@ async function migrate() {
         supplier_last_price DECIMAL(10,2),
         supplier_last_stock_status VARCHAR(50) DEFAULT 'in_stock',
         supplier_last_checked_at TIMESTAMPTZ,
+        supplier_contact_name VARCHAR(300),
+        supplier_contact_email VARCHAR(300),
+        supplier_contact_phone VARCHAR(100),
+        supplier_contact_whatsapp VARCHAR(100),
         is_active BOOLEAN DEFAULT true,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
+
+    // ── Ad platform credentials ────────────────────────────────────────────
+    await db.raw(`
+      CREATE TABLE IF NOT EXISTS ad_platform_credentials (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        platform VARCHAR(100) NOT NULL,
+        account_name VARCHAR(300),
+        api_key_encrypted TEXT,
+        api_secret_encrypted TEXT,
+        access_token_encrypted TEXT,
+        refresh_token_encrypted TEXT,
+        payment_card_holder VARCHAR(300),
+        payment_card_last4 VARCHAR(4),
+        billing_reference VARCHAR(300),
+        is_active BOOLEAN DEFAULT false,
+        mode VARCHAR(20) DEFAULT 'simulation',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    // ── Email messages log ─────────────────────────────────────────────────
+    await db.raw(`
+      CREATE TABLE IF NOT EXISTS email_messages (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        account_id UUID REFERENCES email_accounts(id) ON DELETE SET NULL,
+        direction VARCHAR(20) DEFAULT 'inbound',
+        from_address VARCHAR(300),
+        to_address VARCHAR(300),
+        subject VARCHAR(500),
+        body TEXT,
+        message_id VARCHAR(500),
+        in_reply_to VARCHAR(500),
+        order_id UUID REFERENCES orders(id) ON DELETE SET NULL,
+        is_read BOOLEAN DEFAULT false,
+        is_auto_replied BOOLEAN DEFAULT false,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    // ── Safe ALTER TABLE additions (idempotent) ──────────────────────────────
+    // Add image_status to products
+    await db.raw(`DO $$ BEGIN
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS image_status VARCHAR(50) DEFAULT 'missing';
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS primary_image_url TEXT;
+    EXCEPTION WHEN OTHERS THEN NULL; END $$`);
+
+    // Add payment_status to orders (safe if table already has it)
+    await db.raw(`DO $$ BEGIN
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_status VARCHAR(50) DEFAULT 'pending';
+    EXCEPTION WHEN OTHERS THEN NULL; END $$`);
+
+    // Add supplier_variant_id + fulfillment_status to order_items
+    await db.raw(`DO $$ BEGIN
+      ALTER TABLE order_items ADD COLUMN IF NOT EXISTS supplier_variant_id VARCHAR(300);
+      ALTER TABLE order_items ADD COLUMN IF NOT EXISTS fulfillment_status VARCHAR(50) DEFAULT 'pending';
+      ALTER TABLE order_items ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+    EXCEPTION WHEN OTHERS THEN NULL; END $$`);
+
+    // Add supplier contact fields to supplier_mappings
+    await db.raw(`DO $$ BEGIN
+      ALTER TABLE supplier_mappings ADD COLUMN IF NOT EXISTS supplier_contact_name VARCHAR(300);
+      ALTER TABLE supplier_mappings ADD COLUMN IF NOT EXISTS supplier_contact_email VARCHAR(300);
+      ALTER TABLE supplier_mappings ADD COLUMN IF NOT EXISTS supplier_contact_phone VARCHAR(100);
+      ALTER TABLE supplier_mappings ADD COLUMN IF NOT EXISTS supplier_contact_whatsapp VARCHAR(100);
+    EXCEPTION WHEN OTHERS THEN NULL; END $$`);
+
+    // Add last_test_status fields to integrations_salla
+    await db.raw(`DO $$ BEGIN
+      ALTER TABLE integrations_salla ADD COLUMN IF NOT EXISTS last_test_status VARCHAR(50);
+      ALTER TABLE integrations_salla ADD COLUMN IF NOT EXISTS last_test_message TEXT;
+    EXCEPTION WHEN OTHERS THEN NULL; END $$`);
+
+    // Add display_name, last_test fields to email_accounts
+    await db.raw(`DO $$ BEGIN
+      ALTER TABLE email_accounts ADD COLUMN IF NOT EXISTS display_name VARCHAR(300);
+      ALTER TABLE email_accounts ADD COLUMN IF NOT EXISTS last_test_status VARCHAR(50);
+      ALTER TABLE email_accounts ADD COLUMN IF NOT EXISTS last_test_message TEXT;
+    EXCEPTION WHEN OTHERS THEN NULL; END $$`);
 
     // Indexes
     await db.raw('CREATE INDEX IF NOT EXISTS idx_ad_campaigns_product ON ad_campaigns(product_id)');
@@ -359,6 +451,11 @@ async function migrate() {
     await db.raw('CREATE INDEX IF NOT EXISTS idx_communications_order ON communications(order_id)');
     await db.raw('CREATE INDEX IF NOT EXISTS idx_supplier_mappings_product ON supplier_mappings(product_id)');
     await db.raw('CREATE INDEX IF NOT EXISTS idx_platform_settings_key ON platform_settings(setting_key)');
+    await db.raw('CREATE INDEX IF NOT EXISTS idx_ad_platform_creds_platform ON ad_platform_credentials(platform)');
+    await db.raw('CREATE INDEX IF NOT EXISTS idx_email_messages_order ON email_messages(order_id)');
+    await db.raw('CREATE INDEX IF NOT EXISTS idx_email_messages_direction ON email_messages(direction)');
+    await db.raw('CREATE INDEX IF NOT EXISTS idx_products_image_status ON products(image_status)');
+    await db.raw('CREATE INDEX IF NOT EXISTS idx_order_items_fulfillment ON order_items(fulfillment_status)');
 
     logger.info('Database migration completed successfully');
   } catch (error) {
